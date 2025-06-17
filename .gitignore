@@ -24,3 +24,7 @@ CHECK LIST.xlsx
 **/CHECK LIST.xlsx
 **/prompt.txt
 **/.prettierrc
+
+environment.yml
+/environment.yml
+**/environment.yml
