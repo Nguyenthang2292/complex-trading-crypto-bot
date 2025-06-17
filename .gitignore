@@ -1,9 +1,11 @@
-.venv
-.conda
-models/
-__pycache__/
 .vs/
 .vscode/
 .vs
 .vscode
-config_api.py/
+livetrade/config_api.py/
+
+.venv
+.conda
+models/
+__pycache__/
+
