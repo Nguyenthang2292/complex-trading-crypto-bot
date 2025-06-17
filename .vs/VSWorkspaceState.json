@@ -1,0 +1,15 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\backtest",
+    "\\strategies",
+    "\\strategies\\optimizing",
+    "\\strategies\\orders",
+    "\\strategies\\signals",
+    "\\strategies\\strategy",
+    "\\typings",
+    "\\utilities"
+  ],
+  "SelectedNode": "\\strategies\\signals\\signals_hmm.py",
+  "PreviewInSolutionExplorer": false
+}
