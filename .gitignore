@@ -19,6 +19,8 @@ __pycache__/
 **/.vscode/
 .vscode/
 
-**/CHECK_LIST.xlsx
+CHECK LIST.xlsx
+/CHECK LIST.xlsx
+**/CHECK LIST.xlsx
 **/prompt.txt
 **/.prettierrc
