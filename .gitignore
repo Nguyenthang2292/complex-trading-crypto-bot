@@ -2,4 +2,5 @@
 .conda
 models/
 __pycache__/
-
+.vs
+.vscode
