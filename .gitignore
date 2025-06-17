@@ -2,5 +2,8 @@
 .conda
 models/
 __pycache__/
+.vs/
+.vscode/
 .vs
 .vscode
+.livetrade/config_api.py

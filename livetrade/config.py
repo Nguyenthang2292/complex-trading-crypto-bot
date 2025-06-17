@@ -3,9 +3,6 @@ from pathlib import Path
 # =============================================================================
 # SYSTEM & ENVIRONMENT CONFIGURATION
 # =============================================================================
-# API Credentials
-API_KEY = 'oRHMZAkJaaUjo2fNeVL9c968leM3Qxu9Ns9MoERcRNq71RtGygcw1J9N9KT7tJs3'
-API_SECRET = 'K7Ns736GGnnB1AsSQ1Qw8zWRb9XrKI3gDctu8rrNRAs0t42QD0rnV20RVNZMaZSK'
 
 # File and Directory Paths
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
