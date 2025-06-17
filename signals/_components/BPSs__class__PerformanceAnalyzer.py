@@ -12,7 +12,7 @@ from livetrade.config import (DEFAULT_WINDOW_SIZE, RSI_PERIOD)
 from utilities._logger import setup_logging
 
 # Setup logging with new format
-logger = setup_logging(module_name="__class__best_performance_pairs_performance_analyzer", log_level=logging.DEBUG)
+logger = setup_logging(module_name="BPSs__class__PerformanceAnalyzer", log_level=logging.DEBUG)
 
 class PerformanceAnalyzer:
     """Handles crypto performance analysis for both LONG and SHORT signals."""

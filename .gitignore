@@ -18,3 +18,7 @@ __pycache__/
 # Ignore all .vscode folders recursively
 **/.vscode/
 .vscode/
+
+**/CHECK_LIST.xlsx
+**/prompt.txt
+**/.prettierrc

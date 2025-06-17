@@ -13,11 +13,11 @@ main_dir = os.path.dirname(current_dir)
 if main_dir not in sys.path:
     sys.path.insert(0, main_dir)
 
-from livetrade._components._load_all_pairs_data import load_all_pairs_data
+from livetrade._components._load_all_symbols_data import load_all_symbols_data
 from livetrade._components._tick_processor import tick_processor
-from signals._components._process_signals_hmm import process_signals_hmm
-from signals._components._process_signals_random_forest import process_signals_random_forest
-from signals.signals_best_performance_pairs import signal_best_performance_pairs
+from signals._process_signals._process_signals_hmm import process_signals_hmm
+from signals._process_signals._process_signals_random_forest import process_signals_random_forest
+from signals.signals_best_performance_symbols import signal_best_performance_pairs
 from livetrade._components._combine_all_dataframes import combine_all_dataframes 
 from signals.signals_random_forest import train_and_save_global_rf_model
 
@@ -195,7 +195,7 @@ def crypto_signal_workflow(processor, timeframes_performance: Optional[List[str]
             raise KeyboardInterrupt("Termination requested during data loading")
         
         # Load data for ALL required timeframes at once
-        preloaded_data = load_all_pairs_data(
+        preloaded_data = load_all_symbols_data(
             processor=processor,
             symbols=all_symbols,
             load_multi_timeframes=True,
@@ -500,7 +500,7 @@ def RF_HMM_chain(processor,
             symbols_list = pairs_input
             logger.info(f"Loading data for RF training: {len(symbols_list)} symbols...")
             all_timeframes = list(set(timeframes_rf + timeframes_hmm))
-            preloaded_data = load_all_pairs_data(
+            preloaded_data = load_all_symbols_data(
                 processor=processor,
                 symbols=symbols_list,
                 load_multi_timeframes=True,

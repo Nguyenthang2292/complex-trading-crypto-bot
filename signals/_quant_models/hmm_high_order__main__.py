@@ -9,7 +9,7 @@ init(autoreset=True)
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
 
-from data_class.class_optimizing_parameters import OptimizingParameters
+from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
 from signals._quant_models.hmm_high_order import hmm_high_order
 from utilities._logger import setup_logging
 logger = setup_logging('hmm_high_order__main__', log_level=logging.DEBUG)
@@ -85,7 +85,7 @@ if __name__ == "__main__":
             if all(col in df.columns for col in required_cols):
                 
                 # Run HMM analysis
-                high_order_hmm = hmm_high_order(df, train_ratio=0.8, eval_mode=True, optimizing_params=OptimizingParameters())
+                high_order_hmm = hmm_high_order(df, train_ratio=0.8, eval_mode=True, optimizing_params=OptimizingParametersHMM())
                 
                 # Map state to readable format
                 state_description = {

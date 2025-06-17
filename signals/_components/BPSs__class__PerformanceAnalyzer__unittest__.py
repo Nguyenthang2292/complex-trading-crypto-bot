@@ -8,7 +8,7 @@ import sys
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
 
-from signals._quant_models.best_performance_pairs__class__performance_analyzer import PerformanceAnalyzer
+from signals._components.BPSs__class__PerformanceAnalyzer import PerformanceAnalyzer
 
 class TestPerformanceAnalyzer(unittest.TestCase):
     

@@ -14,7 +14,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
     
 from signals.signals_hmm import hmm_signals
-from data_class.class_optimizing_parameters import OptimizingParameters
+from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
 
 from utilities._logger import setup_logging
 logger = setup_logging(module_name="generate_signals_hmm", log_level=logging.INFO)
@@ -40,7 +40,7 @@ def generate_signal_hmm(pair: str, df: pd.DataFrame, strict_mode: bool = False) 
     
     try:
         # Create OptimizingParameters with specified strict_mode
-        params = OptimizingParameters()
+        params = OptimizingParametersHMM()
         params.strict_mode = strict_mode
         
         # Calculate RSI using pandas_ta with default 14 period

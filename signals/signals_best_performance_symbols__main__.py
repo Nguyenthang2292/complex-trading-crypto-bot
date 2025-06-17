@@ -8,10 +8,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from livetrade._components._tick_processor import tick_processor
 from livetrade._components._load_all_symbols_data import load_symbol_data
 from livetrade.config import DEFAULT_TIMEFRAMES
-from signals.signals_best_performance_pairs import (signal_best_performance_pairs, print_performance_summary)
+from signals.signals_best_performance_symbols import (signal_best_performance_pairs, logging_performance_summary)
 from utilities._logger import setup_logging
 
-logger = setup_logging('signals_best_performance_pairs__main__', log_level=logging.DEBUG)
+logger = setup_logging('signals_best_performance_symbols__main__', log_level=logging.DEBUG)
 
 def main():
     """Run signal analysis for best performing pairs"""
@@ -72,7 +72,7 @@ def main():
             preloaded_data=symbol_data
         )
         
-        print_performance_summary(result)
+        logging_performance_summary(result)
         return result
         
     except Exception as e:

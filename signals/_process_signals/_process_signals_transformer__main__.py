@@ -16,7 +16,7 @@ from livetrade.config import (
     
 from livetrade._components._tick_processor import tick_processor
 from livetrade._components._load_all_pairs_data import load_all_pairs_data
-from signals.signals_best_performance_pairs import signal_best_performance_pairs
+from signals.signals_best_performance_symbols import signal_best_performance_pairs
 from signals._components._process_signals_transformer import process_signals_transformer
 
 from utilities._logger import setup_logging

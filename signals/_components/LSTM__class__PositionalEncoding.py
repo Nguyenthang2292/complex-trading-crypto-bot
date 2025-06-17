@@ -13,7 +13,7 @@ if signals_dir not in sys.path:
 
 from utilities._logger import setup_logging
 # Initialize logger for LSTM Attention module
-logger = setup_logging(module_name="_positional_encoding", log_level=logging.DEBUG)
+logger = setup_logging(module_name="LSTM__class__PositionalEncoding", log_level=logging.DEBUG)
 
 class PositionalEncoding(nn.Module):
     """

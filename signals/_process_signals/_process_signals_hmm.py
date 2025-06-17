@@ -23,8 +23,8 @@ project_root = os.path.dirname(signals_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from livetrade._components._load_all_pairs_data import load_all_pairs_data
-from signals._components._generate_signals_hmm import generate_signal_hmm
+from livetrade._components._load_all_symbols_data import load_all_symbols_data
+from signals._process_signals._generate_signals_hmm import generate_signal_hmm
 
 from utilities._logger import setup_logging
 logger = setup_logging(module_name="process_signals_hmm", log_level=logging.INFO)

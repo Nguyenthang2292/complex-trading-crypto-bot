@@ -8,8 +8,7 @@ import torch.nn.functional as F
 from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent)) if str(Path(__file__).parent.parent.parent) not in sys.path else None
 from utilities._logger import setup_logging
 
-logger = setup_logging(module_name="LSTM__class__focal_loss", log_level=logging.DEBUG)
-
+logger = setup_logging(module_name="LSTM__class__FocalLoss", log_level=logging.DEBUG)
 
 class FocalLoss(nn.Module):
     """
@@ -31,6 +30,12 @@ class FocalLoss(nn.Module):
         reduction: Literal['mean', 'sum', 'none'] = 'mean'
     ) -> None:
         super().__init__()
+        
+        # Validate reduction parameter
+        valid_reductions = ['mean', 'sum', 'none']
+        if reduction not in valid_reductions:
+            raise ValueError(f"Invalid reduction '{reduction}'. Must be one of {valid_reductions}")
+        
         self.alpha = alpha
         self.gamma = gamma
         self.reduction = reduction

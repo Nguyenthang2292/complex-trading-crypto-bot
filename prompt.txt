@@ -6,3 +6,5 @@ bổ sung datatype cho input và return đầy đủ
 refactor lại các logger với method tương ứng từ _logger.py
 
 kiểm tra lại file signals_transformer.py xem còn testcase nào cần bổ sung thì bổ sung vào file signals_transformer__unittest__.py cho tôi
+
+trình bày kết quả các test dưới dạng báo cáo ở cmd cho tôi, update truẹc tiếp trên file không tách thành file mơi

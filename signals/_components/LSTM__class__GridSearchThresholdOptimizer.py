@@ -4,9 +4,9 @@ from typing import Optional, Tuple
 import numpy as np
 
 from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent)) if str(Path(__file__).parent.parent.parent) not in sys.path else None
-from utilities._logger import setup_logging
 
-logger = setup_logging(module_name="LSTM__class__grid_search_threshold_optimizer", log_level=logging.DEBUG)
+from utilities._logger import setup_logging
+logger = setup_logging(module_name="LSTM__class__GridSearchThresholdOptimizer", log_level=logging.DEBUG)
 
 class GridSearchThresholdOptimizer:
     """
@@ -41,6 +41,14 @@ class GridSearchThresholdOptimizer:
         Returns:
             Tuple of (best_threshold, best_sharpe_ratio)
         """
+        # Validate input lengths
+        if len(predictions) != len(returns) or len(returns) != len(prices):
+            raise ValueError(f"Input arrays must have same length. Got predictions: {len(predictions)}, "
+                           f"returns: {len(returns)}, prices: {len(prices)}")
+        
+        if len(predictions) == 0:
+            raise ValueError("Input arrays cannot be empty")
+        
         best_threshold = None
         best_sharpe = -np.inf
         
@@ -48,7 +56,16 @@ class GridSearchThresholdOptimizer:
             signals = np.where(predictions > threshold, 1,  
                              np.where(predictions < -threshold, -1, 0))
             
-            strategy_returns = signals[:-1] * returns[1:]
+            # Use prices to calculate portfolio value and returns
+            portfolio_values = [prices[0]]
+            for i in range(len(signals) - 1):
+                if signals[i] != 0:
+                    portfolio_values.append(portfolio_values[-1] * (1 + signals[i] * returns[i + 1]))
+                else:
+                    portfolio_values.append(portfolio_values[-1])
+            
+            portfolio_values = np.array(portfolio_values)
+            strategy_returns = np.diff(portfolio_values) / portfolio_values[:-1]
             
             if len(strategy_returns) > 0 and np.std(strategy_returns) > 0:
                 sharpe_ratio = np.mean(strategy_returns) / np.std(strategy_returns) * np.sqrt(252)
@@ -80,6 +97,16 @@ class GridSearchThresholdOptimizer:
         Returns:
             Tuple of (best_confidence_threshold, best_sharpe_ratio)
         """
+        # Validate input lengths
+        if len(probabilities) != len(returns):
+            raise ValueError(f"Input arrays must have same length. Got probabilities: {len(probabilities)}, "
+                           f"returns: {len(returns)}")
+        
+        if len(probabilities) == 0:
+            self.best_threshold = None
+            self.best_sharpe = -np.inf
+            return None, -np.inf
+        
         confidence_thresholds = np.arange(0.5, 0.95, 0.05)
         best_confidence = None
         best_sharpe = -np.inf

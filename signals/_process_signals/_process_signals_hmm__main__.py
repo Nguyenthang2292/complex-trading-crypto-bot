@@ -33,7 +33,7 @@ def main():
     """
     try:
         from livetrade._components._tick_processor import tick_processor
-        from signals.signals_best_performance_pairs import signal_best_performance_pairs
+        from signals.signals_best_performance_symbols import signal_best_performance_pairs
         from datetime import datetime
         
         # Initialize processor with dummy callbacks

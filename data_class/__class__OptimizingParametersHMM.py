@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 @dataclass
-class OptimizingParameters:
+class OptimizingParametersHMM:
     """
     OptimizingParameters class stores configuration parameters for different trading strategies.
     The class contains parameters for two main strategies:

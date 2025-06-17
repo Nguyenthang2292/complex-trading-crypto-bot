@@ -9,8 +9,7 @@ import os
 # Add the parent directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from signals.signals_best_performance_pairs import (
-    PerformanceAnalyzer,
+from signals.signals_best_performance_symbols import (
     signal_best_performance_pairs,
     get_top_performers_by_timeframe,
     get_worst_performers_by_timeframe,
@@ -21,9 +20,9 @@ from signals.signals_best_performance_pairs import (
     _create_result_dict,
     _calculate_timeframe_statistics,
     _log_timeframe_stats,
-    _log_analysis_results,
-    print_performance_summary
+    logging_performance_summary
 )
+from signals._components.BPSs__class__PerformanceAnalyzer import PerformanceAnalyzer
 
 class TestPerformanceAnalyzer(unittest.TestCase):
     """Test cases for PerformanceAnalyzer class"""
@@ -276,7 +275,7 @@ class TestMainFunction(unittest.TestCase):
         
         return data
     
-    @patch('signals.signals_best_performance_pairs.logger')
+    @patch('signals.signals_best_performance_symbols.logger')
     def test_signal_best_performance_pairs_success(self, mock_logger):
         """Test successful execution of main function"""
         result = signal_best_performance_pairs(
@@ -326,7 +325,6 @@ class TestMainFunction(unittest.TestCase):
         )
         
         self.assertEqual(result, {})
-
 
 class TestUtilityFunctions(unittest.TestCase):
     """Test cases for utility functions"""
@@ -435,7 +433,6 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(best[0]['symbol'], 'BTCUSDT')
         self.assertEqual(worst[0]['symbol'], 'LINKUSDT')  # Worst first after reverse
 
-
 class TestPrivateFunctions(unittest.TestCase):
     """Test cases for private helper functions"""
     
@@ -504,7 +501,7 @@ class TestPrivateFunctions(unittest.TestCase):
     
     def test_log_timeframe_stats(self):
         """Test logging of timeframe statistics"""
-        with patch('signals.signals_best_performance_pairs.logger') as mock_logger:
+        with patch('signals.signals_best_performance_symbols.logger') as mock_logger:
             stats = {
                 'processed': 10,
                 'no_timeframe': 2,
@@ -522,26 +519,6 @@ class TestPrivateFunctions(unittest.TestCase):
             mock_logger.performance.assert_any_call("  - Skipped (insufficient data): 3")
             mock_logger.performance.assert_any_call("  - Skipped (low volume): 1")
 
-    def test_log_analysis_results(self):
-        """Test logging of analysis results"""
-        with patch('signals.signals_best_performance_pairs.logger') as mock_logger:
-            best_performers = [
-                {'symbol': 'BTCUSDT', 'composite_score': 0.85},
-                {'symbol': 'ETHUSDT', 'composite_score': 0.75},
-                {'symbol': 'BNBUSDT', 'composite_score': 0.70}
-            ]
-            
-            worst_performers = [
-                {'symbol': 'XRPUSDT', 'composite_score': 0.30},
-                {'symbol': 'ADAUSDT', 'composite_score': 0.25}
-            ]
-            
-            _log_analysis_results(best_performers, worst_performers, True)
-            
-            # Verify logger calls
-            mock_logger.success.assert_called_once()
-            self.assertEqual(mock_logger.signal.call_count, 7)  # 2 headers + 5 performers
-    
     def test_create_result_dict(self):
         """Test creation of the result dictionary"""
         best_performers = [{'symbol': 'BTCUSDT', 'composite_score': 0.85}]
@@ -550,33 +527,28 @@ class TestPrivateFunctions(unittest.TestCase):
         symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT']
         timeframes = ['1h', '4h']
         
-        with patch('signals.signals_best_performance_pairs._log_analysis_results') as mock_log:
-            result = _create_result_dict(
-                best_performers, worst_performers, timeframe_results,
-                symbols, timeframes, 0.3, 0.3, 24, 1000000, True
-            )
-            
-            # Check result structure
-            self.assertIn('best_performers', result)
-            self.assertIn('worst_performers', result)
-            self.assertIn('timeframe_analysis', result)
-            self.assertIn('summary', result)
-            
-            # Check summary fields
-            summary = result['summary']
-            self.assertEqual(summary['total_symbols_analyzed'], 3)
-            self.assertEqual(summary['timeframes_analyzed'], ['1h', '4h'])
-            self.assertEqual(summary['top_performers_count'], 1)
-            self.assertEqual(summary['worst_performers_count'], 1)
-            self.assertEqual(summary['top_percentage'], 0.3)
-            self.assertEqual(summary['short_percentage'], 0.3)
-            self.assertEqual(summary['performance_period'], 24)
-            self.assertEqual(summary['min_volume_usdt'], 1000000)
-            self.assertEqual(summary['include_short_signals'], True)
-            
-            # Verify logging was called
-            mock_log.assert_called_once()
-
+        result = _create_result_dict(
+            best_performers, worst_performers, timeframe_results,
+            symbols, timeframes, 0.3, 0.3, 24, 1000000, True
+        )
+        
+        # Check result structure
+        self.assertIn('best_performers', result)
+        self.assertIn('worst_performers', result)
+        self.assertIn('timeframe_analysis', result)
+        self.assertIn('summary', result)
+        
+        # Check summary fields
+        summary = result['summary']
+        self.assertEqual(summary['total_symbols_analyzed'], 3)
+        self.assertEqual(summary['timeframes_analyzed'], ['1h', '4h'])
+        self.assertEqual(summary['top_performers_count'], 1)
+        self.assertEqual(summary['worst_performers_count'], 1)
+        self.assertEqual(summary['top_percentage'], 0.3)
+        self.assertEqual(summary['short_percentage'], 0.3)
+        self.assertEqual(summary['performance_period'], 24)
+        self.assertEqual(summary['min_volume_usdt'], 1000000)
+        self.assertEqual(summary['include_short_signals'], True)
 
 class TestAnalyzeTimeframePerformance(unittest.TestCase):
     """Test cases for _analyze_timeframe_performance function"""
@@ -587,16 +559,16 @@ class TestAnalyzeTimeframePerformance(unittest.TestCase):
         
         # Create sample symbol data
         np.random.seed(42)
-        dates = pd.date_range('2024-01-01', periods=100, freq='1h')  # More data points
+        dates = pd.date_range('2024-01-01', periods=100, freq='1h')
         
         # Sample data for BTC (uptrend)
         btc_prices = [40000.0]
-        for i in range(99):  # Changed from 49 to 99
+        for i in range(99):
             btc_prices.append(btc_prices[-1] * (1 + np.random.normal(0.002, 0.01)))
         
         # Sample data for ETH (downtrend)
         eth_prices = [3000.0]
-        for i in range(99):  # Changed from 49 to 99
+        for i in range(99):
             eth_prices.append(eth_prices[-1] * (1 + np.random.normal(-0.001, 0.01)))
         
         self.symbol_data = {
@@ -606,7 +578,7 @@ class TestAnalyzeTimeframePerformance(unittest.TestCase):
                     'high': [p * 1.01 for p in btc_prices],
                     'low': [p * 0.99 for p in btc_prices],
                     'close': btc_prices,
-                    'volume': [np.random.uniform(5000000, 10000000) for _ in range(100)]  # Changed from 50 to 100
+                    'volume': [np.random.uniform(5000000, 10000000) for _ in range(100)]
                 }, index=dates)
             },
             'ETHUSDT': {
@@ -615,7 +587,7 @@ class TestAnalyzeTimeframePerformance(unittest.TestCase):
                     'high': [p * 1.01 for p in eth_prices],
                     'low': [p * 0.99 for p in eth_prices],
                     'close': eth_prices,
-                    'volume': [np.random.uniform(3000000, 8000000) for _ in range(100)]  # Changed from 50 to 100
+                    'volume': [np.random.uniform(3000000, 8000000) for _ in range(100)]
                 }, index=dates)
             },
             'LOWVOLUME': {
@@ -624,7 +596,7 @@ class TestAnalyzeTimeframePerformance(unittest.TestCase):
                     'high': [101] * 100,
                     'low': [99] * 100,
                     'close': [100] * 100,
-                    'volume': [5000] * 100  # Adjusted volume: 5000 * 100 = 500,000 avg_volume_usdt
+                    'volume': [5000] * 100
                 }, index=dates)
             },
             'INSUFFICIENTDATA': {
@@ -638,8 +610,8 @@ class TestAnalyzeTimeframePerformance(unittest.TestCase):
             }
         }
     
-    @patch('signals.signals_best_performance_pairs.logger')
-    @patch('signals.signals_best_performance_pairs.tqdm')
+    @patch('signals.signals_best_performance_symbols.logger')
+    @patch('signals.signals_best_performance_symbols.tqdm')
     def test_analyze_timeframe_performance(self, mock_tqdm, mock_logger):
         """Test analysis of timeframe performance"""
         # Mock tqdm to avoid progressbar in tests
@@ -650,7 +622,7 @@ class TestAnalyzeTimeframePerformance(unittest.TestCase):
             self.symbol_data,
             '1h',
             performance_period=20,
-            min_volume_usdt=1000000, # Threshold for filtering
+            min_volume_usdt=1000000,
             analyze_for_short=True
         )
         
@@ -672,15 +644,13 @@ class TestAnalyzeTimeframePerformance(unittest.TestCase):
         self.assertNotIn('INSUFFICIENTDATA', processed_symbols)
         
         # LOWVOLUME should be filtered out due to low volume
-        # (avg_volume_usdt = 5000 * 100 = 500,000, which is < min_volume_usdt = 1,000,000)
         self.assertNotIn('LOWVOLUME', processed_symbols)
         
         # Check statistics
         stats = result['statistics']
-        self.assertEqual(stats['symbols_processed'], 2) # BTCUSDT and ETHUSDT
+        self.assertEqual(stats['symbols_processed'], 2)
         self.assertIsNotNone(stats['avg_score'])
         self.assertIsNotNone(stats['top_performer'])
-        
 
 class TestPrintPerformanceSummary(unittest.TestCase):
     """Test cases for print_performance_summary function"""
@@ -704,46 +674,31 @@ class TestPrintPerformanceSummary(unittest.TestCase):
             }
         }
     
-    @patch('builtins.print')
-    @patch('signals.signals_best_performance_pairs.logger')
-    def test_print_performance_summary(self, mock_logger, mock_print):
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_print_performance_summary(self, mock_logger):
         """Test performance summary printing"""
-        print_performance_summary(self.analysis_result)
+        logging_performance_summary(self.analysis_result)
         
-        # Verify print was called multiple times
-        self.assertGreater(mock_print.call_count, 10)
+        # Verify logger was called multiple times for analysis output
+        self.assertGreater(mock_logger.analysis.call_count, 5)
         
         # Test with empty results
-        mock_print.reset_mock()
-        print_performance_summary({})
+        mock_logger.reset_mock()
+        logging_performance_summary({})
         
         # Should log a warning and not crash
         mock_logger.warning.assert_called_once()
     
-    @patch('signals.signals_best_performance_pairs._print_performers_section')
-    @patch('builtins.print')
-    def test_print_performance_section_calls(self, mock_print, mock_section):
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_print_performance_section_calls(self, mock_logger):
         """Test that performer sections are printed correctly"""
-        print_performance_summary(self.analysis_result)
+        logging_performance_summary(self.analysis_result)
         
-        # Verify _print_performers_section was called twice (for best and worst)
-        self.assertEqual(mock_section.call_count, 2)
-        
-        # First call should be for best performers
-        mock_section.assert_any_call("🟢 TOP", self.analysis_result['best_performers'], "LONG SIGNALS")
-        
-        # Second call should be for worst performers
-        mock_section.assert_any_call("🔴 BOTTOM", self.analysis_result['worst_performers'], "SHORT SIGNALS")
+        # Verify logger.analysis was called for section headers
+        # The actual messages include newlines and specific formatting
+        mock_logger.analysis.assert_any_call("\n🟢 TOP 2 PERFORMERS (LONG SIGNALS):")
+        mock_logger.analysis.assert_any_call("\n🔴 BOTTOM 1 PERFORMERS (SHORT SIGNALS):")
 
-
-# Add the new test classes to the main execution block
-if __name__ == '__main__':
-    # Configure unittest to run with verbose output
-    unittest.main(verbosity=2, buffer=True)
-# Add the new test classes to the main execution block
-if __name__ == '__main__':
-    # Configure unittest to run with verbose output
-    unittest.main(verbosity=2, buffer=True)
 if __name__ == '__main__':
     # Configure unittest to run with verbose output
     unittest.main(verbosity=2, buffer=True)

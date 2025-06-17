@@ -9,7 +9,7 @@ main_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 python_path = [main_dir]
 runtime_env = {"env_vars": {"PYTHONPATH": os.pathsep.join(python_path)}}
 
-from data_class.class_optimizing_parameters import OptimizingParameters
+from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
 from livetrade.config import (
     SIGNAL_LONG_HMM as LONG,
     SIGNAL_HOLD_HMM as HOLD,
@@ -31,7 +31,7 @@ def initialize_ray():
 
 Signal = Literal[-1, 0, 1] 
 
-def hmm_signals(df: pd.DataFrame, optimizing_params: OptimizingParameters = OptimizingParameters()) -> Tuple[Signal, Signal]:
+def hmm_signals(df: pd.DataFrame, optimizing_params: OptimizingParametersHMM = OptimizingParametersHMM()) -> Tuple[Signal, Signal]:
     """
     Generate HMM trading signals from high-order HMM and HMM-KAMA models.
     

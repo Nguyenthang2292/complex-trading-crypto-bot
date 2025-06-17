@@ -7,26 +7,14 @@ import torch.nn as nn
 from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent)) if str(Path(__file__).parent.parent.parent) not in sys.path else None
 
 from utilities._logger import setup_logging
-logger = setup_logging(module_name="LSTM__class__models", log_level=logging.DEBUG)
+logger = setup_logging(module_name="LSTM__class__Models", log_level=logging.DEBUG)
 
-from signals._components.LSTM__class__multi_head_attention import MultiHeadAttention  
-from signals._components.LSTM__class__feed_foward import FeedForward
-from signals._components.LSTM__class__positional_encoding import PositionalEncoding
+from signals._components.LSTM__class__MultiheadAttention import MultiHeadAttention  
+from signals._components.LSTM__class__FeedForward import FeedForward
+from signals._components.LSTM__class__PositionalEncoding import PositionalEncoding
 
 class LSTMModel(nn.Module):
-    """
-    PyTorch LSTM model for cryptocurrency price prediction.
-    
-    This model uses multiple LSTM layers with dropout for regularization
-    and outputs probability distributions over 3 classes (SELL, NEUTRAL, BUY).
-    
-    Args:
-        input_size: Number of input features
-        hidden_size: Hidden dimension of LSTM layers (default: 64)
-        num_layers: Number of LSTM layers (default: 3)
-        num_classes: Number of output classes (default: 3)
-        dropout: Dropout probability (default: 0.3)
-    """
+    """PyTorch LSTM model for cryptocurrency price prediction with multi-layer architecture."""
     
     def __init__(
         self, 
@@ -38,76 +26,49 @@ class LSTMModel(nn.Module):
     ) -> None:
         super().__init__()
         
-        if input_size <= 0:
-            raise ValueError("input_size must be positive, got {0}".format(input_size))
-        if hidden_size <= 0:
-            raise ValueError("hidden_size must be positive, got {0}".format(hidden_size))
-        if num_classes <= 0:
-            raise ValueError("num_classes must be positive, got {0}".format(num_classes))
+        # Validation
+        for name, value in [("input_size", input_size), ("hidden_size", hidden_size), ("num_classes", num_classes)]:
+            if value <= 0:
+                raise ValueError(f"{name} must be positive, got {value}")
         if not 0.0 <= dropout <= 1.0:
-            raise ValueError("dropout must be between 0.0 and 1.0, got {0}".format(dropout))
+            raise ValueError(f"dropout must be between 0.0 and 1.0, got {dropout}")
         
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         
+        # LSTM layers with progressive dimension reduction
         self.lstm1 = nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True)
         self.lstm2 = nn.LSTM(hidden_size, 32, num_layers=1, batch_first=True)
         self.lstm3 = nn.LSTM(32, 16, num_layers=1, batch_first=True)
         
+        # Dropout layers
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(0.2)
         
+        # Classification layers
         self.fc1 = nn.Linear(16, 8)
         self.fc2 = nn.Linear(8, num_classes)
-        
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the LSTM model.
+        """Forward pass through LSTM layers with progressive dimension reduction."""
+        lstm_out, _ = self.lstm1(x)
+        lstm_out = self.dropout1(lstm_out)
         
-        Args:
-            x: Input tensor of shape (batch_size, seq_len, input_size)
-            
-        Returns:
-            Output probabilities of shape (batch_size, num_classes)
-        """
-        lstm_out1, _ = self.lstm1(x)
-        lstm_out1 = self.dropout1(lstm_out1)
+        lstm_out, _ = self.lstm2(lstm_out)
+        lstm_out = self.dropout2(lstm_out)
         
-        lstm_out2, _ = self.lstm2(lstm_out1)
-        lstm_out2 = self.dropout2(lstm_out2)
-        
-        lstm_out3, _ = self.lstm3(lstm_out2)
-        
-        lstm_out = lstm_out3[:, -1, :]
+        lstm_out, _ = self.lstm3(lstm_out)
+        lstm_out = lstm_out[:, -1, :] # Take last timestep
         lstm_out = self.dropout3(lstm_out)
         
         out = self.relu(self.fc1(lstm_out))
-        out = self.fc2(out)
-        out = self.softmax(out)
-        
-        return out
-    
+        return self.softmax(self.fc2(out))
 
 class LSTMAttentionModel(nn.Module):
-    """
-    PyTorch LSTM model with Multi-Head Attention for cryptocurrency price prediction.
-    
-    Architecture: Data → LSTM → Attention → Classification
-    This model enhances LSTM with attention mechanism for better sequence modeling.
-    
-    Args:
-        input_size: Number of input features
-        hidden_size: Hidden dimension of LSTM layers (default: 64)
-        num_layers: Number of LSTM layers (default: 3)
-        num_classes: Number of output classes (default: 3)
-        dropout: Dropout probability (default: 0.3)
-        num_heads: Number of attention heads (default: 8)
-        use_positional_encoding: Whether to use positional encoding (default: True)
-    """
+    """LSTM model enhanced with Multi-Head Attention mechanism."""
     
     def __init__(
         self, 
@@ -121,36 +82,39 @@ class LSTMAttentionModel(nn.Module):
     ) -> None:
         super().__init__()
         
-        if input_size <= 0:
-            raise ValueError("input_size must be positive, got {0}".format(input_size))
-        if hidden_size <= 0:
-            raise ValueError("hidden_size must be positive, got {0}".format(hidden_size))
-        if num_classes <= 0:
-            raise ValueError("num_classes must be positive, got {0}".format(num_classes))
-        if num_heads <= 0:
-            raise ValueError("num_heads must be positive, got {0}".format(num_heads))
+        # Validation
+        for name, value in [("input_size", input_size), ("hidden_size", hidden_size), 
+                           ("num_classes", num_classes), ("num_heads", num_heads)]:
+            if value <= 0:
+                raise ValueError(f"{name} must be positive, got {value}")
         if not 0.0 <= dropout <= 1.0:
-            raise ValueError("dropout must be between 0.0 and 1.0, got {0}".format(dropout))
+            raise ValueError(f"dropout must be between 0.0 and 1.0, got {dropout}")
         
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.use_positional_encoding = use_positional_encoding
+        self.attention_dim = 16
         
+        # LSTM layers
         self.lstm1 = nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True)
         self.lstm2 = nn.LSTM(hidden_size, 32, num_layers=1, batch_first=True)
-        self.lstm3 = nn.LSTM(32, 16, num_layers=1, batch_first=True)
+        self.lstm3 = nn.LSTM(32, self.attention_dim, num_layers=1, batch_first=True)
         
+        # Dropout layers
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(0.2)
         
-        self.attention_dim = 16
-        
+        # Adjust num_heads for compatibility - must be done before creating MultiHeadAttention
+        original_num_heads = num_heads
         if self.attention_dim % num_heads != 0:
-            num_heads = min(num_heads, self.attention_dim)
-            logger.warning("Adjusted num_heads to {0} to be compatible with attention_dim {1}".format(
-                num_heads, self.attention_dim))
+            # Find the largest divisor of attention_dim that's <= original num_heads
+            valid_heads = [i for i in range(1, min(num_heads, self.attention_dim) + 1) 
+                          if self.attention_dim % i == 0]
+            num_heads = max(valid_heads) if valid_heads else 1
+            logger.warning(f"Adjusted num_heads from {original_num_heads} to {num_heads} to be compatible with attention_dim {self.attention_dim}")
         
+        # Attention components
         if use_positional_encoding:
             self.pos_encoding = PositionalEncoding(self.attention_dim)
         
@@ -169,6 +133,7 @@ class LSTMAttentionModel(nn.Module):
         self.layer_norm1 = nn.LayerNorm(self.attention_dim)
         self.layer_norm2 = nn.LayerNorm(self.attention_dim)
         
+        # Attention pooling and classification
         self.attention_pooling = nn.Sequential(
             nn.Linear(self.attention_dim, 1),
             nn.Softmax(dim=1)
@@ -182,93 +147,73 @@ class LSTMAttentionModel(nn.Module):
             nn.Softmax(dim=1)
         )
         
-        logger.model("LSTM-Attention model initialized with {0} heads and {1}D attention".format(
-            num_heads, self.attention_dim))
+        logger.model(f"LSTM-Attention model initialized with {num_heads} heads and {self.attention_dim}D attention")
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the LSTM-Attention model.
+        """Forward pass through LSTM-Attention architecture."""
+        # LSTM processing
+        lstm_out, _ = self.lstm1(x)
+        lstm_out = self.dropout1(lstm_out)
         
-        Args:
-            x: Input tensor of shape (batch_size, seq_len, input_size)
-            
-        Returns:
-            Output probabilities of shape (batch_size, num_classes)
-        """
-        lstm_out1, _ = self.lstm1(x)
-        lstm_out1 = self.dropout1(lstm_out1)
+        lstm_out, _ = self.lstm2(lstm_out)
+        lstm_out = self.dropout2(lstm_out)
         
-        lstm_out2, _ = self.lstm2(lstm_out1)
-        lstm_out2 = self.dropout2(lstm_out2)
+        lstm_out, _ = self.lstm3(lstm_out)
         
-        lstm_out3, _ = self.lstm3(lstm_out2)
-        
+        # Positional encoding
         if self.use_positional_encoding:
-            lstm_out3 = self.pos_encoding(lstm_out3)
+            lstm_out = self.pos_encoding(lstm_out)
         
-        attn_input = lstm_out3
-        attn_output = self.multihead_attention(attn_input, attn_input, attn_input)
-        attn_output = self.layer_norm1(attn_output + attn_input)
+        # Self-attention mechanism
+        attn_output = self.multihead_attention(lstm_out, lstm_out, lstm_out)
+        attn_output = self.layer_norm1(attn_output + lstm_out)
         
+        # Feed-forward network
         ff_output = self.feed_forward(attn_output)
         ff_output = self.layer_norm2(ff_output + attn_output)
         
+        # Attention pooling and classification
         attention_weights = self.attention_pooling(ff_output)
         pooled_output = torch.sum(ff_output * attention_weights, dim=1)
         
-        output = self.classifier(pooled_output)
-        
-        return output
-
+        return self.classifier(pooled_output)
 
 class CNN1DExtractor(nn.Module):
-    """
-    1D CNN feature extractor for time series data.
-    
-    Args:
-        input_channels: Number of input channels
-        cnn_features: Number of CNN features to extract (default: 64)
-        kernel_sizes: List of kernel sizes for multi-scale convolution (default: [3, 5, 7])
-        dropout: Dropout probability (default: 0.3)
-    """
+    """1D CNN feature extractor for multi-scale temporal pattern extraction."""
     
     def __init__(
         self, 
         input_channels: int, 
         cnn_features: int = 64, 
-        kernel_sizes: List[int] = None, 
+        kernel_sizes: Optional[List[int]] = None, 
         dropout: float = 0.3
     ) -> None:
         super().__init__()
         
         if input_channels <= 0:
-            raise ValueError("input_channels must be positive, got {0}".format(input_channels))
+            raise ValueError(f"input_channels must be positive, got {input_channels}")
         
-        if kernel_sizes is None:
-            kernel_sizes = [3, 5, 7]
-            
+        kernel_sizes = kernel_sizes or [3, 5, 7]
         self.input_channels = input_channels
         self.cnn_features = cnn_features
         
+        # Calculate channel distribution for multi-scale convolution
         num_scales = len(kernel_sizes)
-        base = cnn_features // num_scales
+        base_channels = cnn_features // num_scales
         remainder = cnn_features % num_scales
-        out_channels = []
-        for i in range(num_scales):
-            ch = base + (1 if i < remainder else 0)
-            out_channels.append(ch)
+        out_channels = [base_channels + (1 if i < remainder else 0) for i in range(num_scales)]
         
-        self.conv_layers = nn.ModuleList()
-        for idx, kernel_size in enumerate(kernel_sizes):
-            conv_block = nn.Sequential(
-                nn.Conv1d(input_channels, out_channels[idx],
-                         kernel_size=kernel_size, padding=kernel_size//2),
+        # Multi-scale convolution layers
+        self.conv_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv1d(input_channels, out_channels[idx], kernel_size, padding=kernel_size//2),
                 nn.BatchNorm1d(out_channels[idx]),
                 nn.ReLU(),
                 nn.Dropout(dropout)
-            )
-            self.conv_layers.append(conv_block)
+            ) for idx, kernel_size in enumerate(kernel_sizes)
+        ])
         
+        # Feature refinement layers
         self.conv_refine = nn.Sequential(
             nn.Conv1d(cnn_features, cnn_features, kernel_size=3, padding=1),
             nn.BatchNorm1d(cnn_features),
@@ -280,58 +225,22 @@ class CNN1DExtractor(nn.Module):
             nn.Dropout(dropout)
         )
         
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
-        
-        logger.model("CNN1D Extractor initialized with {0} input channels, {1} features".format(
-            input_channels, cnn_features))
+        logger.model(f"CNN1D Extractor: {input_channels} channels → {cnn_features} features")
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the CNN extractor.
+        """Extract multi-scale features from temporal sequences."""
+        x = x.transpose(1, 2) # (batch, seq, features) → (batch, features, seq)
         
-        Args:
-            x: Input tensor of shape (batch_size, seq_len, features)
-            
-        Returns:
-            Extracted features of shape (batch_size, seq_len, cnn_features)
-        """
-        x = x.transpose(1, 2)
-        
-        conv_outputs = []
-        for conv_layer in self.conv_layers:
-            conv_out = conv_layer(x)
-            conv_outputs.append(conv_out)
-        
+        # Multi-scale feature extraction
+        conv_outputs = [conv_layer(x) for conv_layer in self.conv_layers]
         x = torch.cat(conv_outputs, dim=1)
-        x = self.conv_refine(x)
-        x = x.transpose(1, 2)
         
-        return x
-
+        # Feature refinement
+        x = self.conv_refine(x)
+        return x.transpose(1, 2) # Back to (batch, seq, features)
 
 class CNNLSTMAttentionModel(nn.Module):
-    """
-    Enhanced model: CNN feature extraction → LSTM sequence modeling → Attention → Classification/Regression.
-    
-    Pipeline:
-    1. CNN 1D feature extraction
-    2. LSTM processing  
-    3. Multi-Head Attention
-    4. Final Classification/Regression
-    
-    Args:
-        input_size: Number of input features
-        look_back: Sliding window size (default: 60)
-        cnn_features: Number of CNN features (default: 64)
-        lstm_hidden: LSTM hidden dimension (default: 32)
-        num_layers: Number of LSTM layers (default: 2)
-        num_classes: Number of output classes (default: 3)
-        num_heads: Number of attention heads (default: 4)
-        dropout: Dropout probability (default: 0.3)
-        use_attention: Whether to use attention mechanism (default: True)
-        use_positional_encoding: Whether to use positional encoding (default: True)
-        output_mode: Output mode - 'classification' or 'regression' (default: 'classification')
-    """
+    """Hybrid CNN-LSTM-Attention model for advanced sequence modeling."""
     
     def __init__(
         self, 
@@ -349,12 +258,12 @@ class CNNLSTMAttentionModel(nn.Module):
     ) -> None:
         super().__init__()
         
-        if input_size <= 0:
-            raise ValueError("input_size must be positive, got {0}".format(input_size))
-        if look_back <= 0:
-            raise ValueError("look_back must be positive, got {0}".format(look_back))
+        # Validation
+        for name, value in [("input_size", input_size), ("look_back", look_back)]:
+            if value <= 0:
+                raise ValueError(f"{name} must be positive, got {value}")
         if output_mode not in ['classification', 'regression']:
-            raise ValueError("output_mode must be 'classification' or 'regression', got {0}".format(output_mode))
+            raise ValueError(f"output_mode must be 'classification' or 'regression', got {output_mode}")
         
         self.input_size = input_size
         self.look_back = look_back
@@ -364,39 +273,36 @@ class CNNLSTMAttentionModel(nn.Module):
         self.use_attention = use_attention
         self.output_mode = output_mode
         
-        self.cnn_extractor = CNN1DExtractor(
-            input_channels=input_size,
-            cnn_features=cnn_features,
-            dropout=dropout
-        )
+        # CNN feature extraction
+        self.cnn_extractor = CNN1DExtractor(input_size, cnn_features, dropout=dropout)
         
-        self.lstm1 = nn.LSTM(cnn_features, lstm_hidden, num_layers=1, batch_first=True)
-        self.lstm2 = nn.LSTM(lstm_hidden, lstm_hidden//2, num_layers=1, batch_first=True)
+        # LSTM sequence modeling
+        self.lstm1 = nn.LSTM(cnn_features, lstm_hidden, batch_first=True)
+        self.lstm2 = nn.LSTM(lstm_hidden, lstm_hidden//2, batch_first=True)
         
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
         
+        final_features = lstm_hidden // 2
+        
+        # Attention mechanism setup
         if use_attention:
-            self.attention_dim = lstm_hidden // 2
+            self.attention_dim = final_features
             
+            # Adjust num_heads for compatibility - must be done before creating MultiHeadAttention
+            original_num_heads = num_heads
             if self.attention_dim % num_heads != 0:
-                num_heads = min(num_heads, self.attention_dim)
-                logger.warning("Adjusted num_heads to {0} for compatibility".format(num_heads))
+                # Find the largest divisor of attention_dim that's <= original num_heads
+                valid_heads = [i for i in range(1, min(num_heads, self.attention_dim) + 1) 
+                              if self.attention_dim % i == 0]
+                num_heads = max(valid_heads) if valid_heads else 1
+                logger.warning(f"Adjusted num_heads from {original_num_heads} to {num_heads} for compatibility")
             
             if use_positional_encoding:
-                self.pos_encoding = PositionalEncoding(self.attention_dim, max_seq_length=look_back)
+                self.pos_encoding = PositionalEncoding(self.attention_dim, look_back)
             
-            self.multihead_attention = MultiHeadAttention(
-                d_model=self.attention_dim,
-                num_heads=num_heads,
-                dropout=dropout
-            )
-            
-            self.feed_forward = FeedForward(
-                d_model=self.attention_dim,
-                d_ff=self.attention_dim * 2,
-                dropout=dropout
-            )
+            self.multihead_attention = MultiHeadAttention(self.attention_dim, num_heads, dropout)
+            self.feed_forward = FeedForward(self.attention_dim, self.attention_dim * 2, dropout)
             
             self.layer_norm1 = nn.LayerNorm(self.attention_dim)
             self.layer_norm2 = nn.LayerNorm(self.attention_dim)
@@ -405,71 +311,60 @@ class CNNLSTMAttentionModel(nn.Module):
                 nn.Linear(self.attention_dim, 1),
                 nn.Softmax(dim=1)
             )
-            
-            final_features = self.attention_dim
-        else:
-            final_features = lstm_hidden // 2
         
+        # Output layer configuration
+        hidden_dim = final_features // 2
         if output_mode == 'classification':
             self.classifier = nn.Sequential(
-                nn.Linear(final_features, final_features//2),
+                nn.Linear(final_features, hidden_dim),
                 nn.ReLU(),
                 nn.Dropout(dropout),
-                nn.Linear(final_features//2, num_classes),
+                nn.Linear(hidden_dim, num_classes),
                 nn.Softmax(dim=1)
             )
         else:
             self.regressor = nn.Sequential(
-                nn.Linear(final_features, final_features//2),
+                nn.Linear(final_features, hidden_dim),
                 nn.ReLU(),
                 nn.Dropout(dropout),
-                nn.Linear(final_features//2, 1),
+                nn.Linear(hidden_dim, 1),
                 nn.Tanh()
             )
         
-        logger.model("CNN-LSTM-Attention model initialized:")
-        logger.model("  - Look back: {0}, CNN features: {1}".format(look_back, cnn_features))
-        logger.model("  - LSTM hidden: {0}, Attention: {1}".format(lstm_hidden, use_attention))
-        logger.model("  - Output mode: {0}".format(output_mode))
+        logger.model(f"CNN-LSTM-Attention: look_back={look_back}, cnn_features={cnn_features}, "
+                    f"lstm_hidden={lstm_hidden}, attention={use_attention}, mode={output_mode}")
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the CNN-LSTM-Attention model.
-        
-        Args:
-            x: Input tensor of shape (batch_size, seq_len, input_size)
-            
-        Returns:
-            For classification: probabilities of shape (batch_size, num_classes)
-            For regression: predictions of shape (batch_size, 1)
-        """
+        """Forward pass through hybrid CNN-LSTM-Attention architecture."""
+        # CNN feature extraction
         cnn_features = self.cnn_extractor(x)
         
-        lstm_out1, _ = self.lstm1(cnn_features)
-        lstm_out1 = self.dropout1(lstm_out1)
+        # LSTM sequence modeling
+        lstm_out, _ = self.lstm1(cnn_features)
+        lstm_out = self.dropout1(lstm_out)
         
-        lstm_out2, _ = self.lstm2(lstm_out1)
-        lstm_out2 = self.dropout2(lstm_out2)
+        lstm_out, _ = self.lstm2(lstm_out)
+        lstm_out = self.dropout2(lstm_out)
         
+        # Attention processing or simple pooling
         if self.use_attention:
+            # Apply positional encoding if enabled
             if hasattr(self, 'pos_encoding'):
-                lstm_out2 = self.pos_encoding(lstm_out2)
+                lstm_out = self.pos_encoding(lstm_out)
             
-            attn_input = lstm_out2
-            attn_output = self.multihead_attention(attn_input, attn_input, attn_input)
-            attn_output = self.layer_norm1(attn_output + attn_input)
+            # Self-attention mechanism
+            attn_output = self.multihead_attention(lstm_out, lstm_out, lstm_out)
+            attn_output = self.layer_norm1(attn_output + lstm_out)
             
+            # Feed-forward network
             ff_output = self.feed_forward(attn_output)
             ff_output = self.layer_norm2(ff_output + attn_output)
             
+            # Attention pooling
             attention_weights = self.attention_pooling(ff_output)
             pooled_output = torch.sum(ff_output * attention_weights, dim=1)
         else:
-            pooled_output = lstm_out2[:, -1, :]
+            pooled_output = lstm_out[:, -1, :] # Take last timestep
         
-        if self.output_mode == 'classification':
-            output = self.classifier(pooled_output)
-        else:
-            output = self.regressor(pooled_output)
-        
-        return output
+        # Final prediction
+        return self.classifier(pooled_output) if self.output_mode == 'classification' else self.regressor(pooled_output)
