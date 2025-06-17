@@ -6,4 +6,4 @@ __pycache__/
 .vscode/
 .vs
 .vscode
-livetrade/config_api.py
+config_api.py/
