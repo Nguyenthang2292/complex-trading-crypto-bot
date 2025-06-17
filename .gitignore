@@ -1,11 +1,15 @@
-.vs/
-.vscode/
-.vs
-.vscode
-livetrade/config_api.py/
+# Ignore all Python virtual environment folders
+**/.venv/
+.venv/
+.conda/
 
-.venv
-.conda
+# Ignore models folder, its subfolders, and all files inside
 models/
-__pycache__/
+models/**
 
+# Ignore specific config_api file in livetrade folder
+livetrade/config_api
+
+# Ignore all __pycache__ folders recursively
+**/__pycache__/
+__pycache__/
