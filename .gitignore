@@ -8,8 +8,13 @@ models/
 models/**
 
 # Ignore specific config_api file in livetrade folder
-livetrade/config_api
+livetrade/config_api.py
+**/config_api.py
 
 # Ignore all __pycache__ folders recursively
 **/__pycache__/
 __pycache__/
+
+# Ignore all .vscode folders recursively
+**/.vscode/
+.vscode/
