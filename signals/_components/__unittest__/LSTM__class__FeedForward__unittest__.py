@@ -5,9 +5,9 @@ from pathlib import Path
 import sys
 
 current_dir = Path(__file__).resolve().parent
-sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
+sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
 
-from signals._quant_models.LSTM__class__feed_foward import FeedForward
+from signals._components.LSTM__class__FeedForward import FeedForward
 
 class TestFeedForward(unittest.TestCase):
     

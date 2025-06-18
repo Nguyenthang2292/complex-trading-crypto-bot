@@ -4,8 +4,8 @@ import pandas as pd
 import sys
 import os
 
-# Add the parent directory to the path for absolute imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add the parent directory to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from signals.signals_hmm import hmm_signals, initialize_ray, Signal
 from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM

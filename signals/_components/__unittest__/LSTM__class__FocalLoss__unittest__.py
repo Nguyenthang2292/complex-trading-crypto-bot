@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import sys
 from pathlib import Path
 
-from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent)) if str(Path(__file__).parent.parent.parent) not in sys.path else None
+current_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
 from signals._components.LSTM__class__FocalLoss import FocalLoss
 
 class TestFocalLoss(unittest.TestCase):

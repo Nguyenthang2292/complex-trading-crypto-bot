@@ -3,9 +3,10 @@ import numpy as np
 import sys
 from pathlib import Path
 
-from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent)) if str(Path(__file__).parent.parent.parent) not in sys.path else None
-from signals._components.LSTM__class__GridSearchThresholdOptimizer import GridSearchThresholdOptimizer
+current_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
 
+from signals._components.LSTM__class__GridSearchThresholdOptimizer import GridSearchThresholdOptimizer
 
 class TestGridSearchThresholdOptimizer(unittest.TestCase):
     """Test cases for GridSearchThresholdOptimizer class."""

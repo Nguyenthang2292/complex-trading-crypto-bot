@@ -5,8 +5,8 @@ import sys
 import os
 from unittest.mock import patch, MagicMock
 
-# Add the parent directory to sys.path to allow importing modules from sibling directories
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add the parent directory to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from signals.signals_random_forest import (
     _calculate_features,

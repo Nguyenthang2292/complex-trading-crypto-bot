@@ -6,7 +6,7 @@ import numpy as np
 import sys
 
 current_dir = Path(__file__).resolve().parent
-sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
+sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
 
 from signals._components.BPSs__class__PerformanceAnalyzer import PerformanceAnalyzer
 
@@ -333,7 +333,7 @@ class TestPerformanceAnalyzer(unittest.TestCase):
         rsi_constant = PerformanceAnalyzer._calculate_simple_rsi(constant_prices, period=14)
         self.assertEqual(rsi_constant, 50)  # Default for no change
     
-    @patch('signals._quant_models.best_performance_pairs__class__performance_analyzer.logger')
+    @patch('signals._components.BPSs__class__PerformanceAnalyzer.logger')
     def test_error_handling_in_calculate_overall_scores(self, mock_logger):
         """Test error handling in calculate_overall_scores"""
         # Create valid input data but mock numpy.std to raise an exception
@@ -357,7 +357,7 @@ class TestPerformanceAnalyzer(unittest.TestCase):
         timeframe = "1h"
         period = 30
         
-        with patch('signals._quant_models.best_performance_pairs__class__performance_analyzer.logger') as mock_logger:
+        with patch('signals._components.BPSs__class__PerformanceAnalyzer.logger') as mock_logger:
             metrics = self.analyzer.calculate_performance_metrics(
                 invalid_df, symbol, timeframe, period
             )

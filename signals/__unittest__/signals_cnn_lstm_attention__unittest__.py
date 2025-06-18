@@ -9,10 +9,11 @@ from unittest.mock import patch, Mock
 import warnings
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add the parent directory to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from signals._components.LSTM__class__models import CNNLSTMAttentionModel, CNN1DExtractor
-from signals._components.LSTM__class__grid_search_threshold_optimizer import GridSearchThresholdOptimizer
+from signals._components.LSTM__class__Models import CNNLSTMAttentionModel, CNN1DExtractor
+from signals._components.LSTM__class__GridSearchThresholdOptimizer import GridSearchThresholdOptimizer
 from signals._components.LSTM__function__create_sliding_windows import create_sliding_windows
 from signals._components.LSTM__function__create_regression_targets import create_regression_targets
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
@@ -33,7 +34,7 @@ except Exception as e:
     def split_train_test_data(*args, **kwargs):
         return np.array([]), np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
     def create_cnn_lstm_attention_model(*args, **kwargs):
-        from signals._components.LSTM__class__models import LSTMModel, LSTMAttentionModel, CNNLSTMAttentionModel
+        from signals._components.LSTM__class__Models import LSTMModel, LSTMAttentionModel, CNNLSTMAttentionModel
         use_cnn = kwargs.get('use_cnn', False)
         use_attention = kwargs.get('use_attention', True)
         
@@ -44,14 +45,14 @@ except Exception as e:
         else:
             return LSTMModel(input_size=10, hidden_size=8)
     def train_cnn_lstm_attention_model(*args, **kwargs) -> Tuple[Union[nn.Module, None], GridSearchThresholdOptimizer]:
-        from signals._components.LSTM__class__models import LSTMModel
-        from signals._components.LSTM__class__grid_search_threshold_optimizer import GridSearchThresholdOptimizer
+        from signals._components.LSTM__class__Models import LSTMModel
+        from signals._components.LSTM__class__GridSearchThresholdOptimizer import GridSearchThresholdOptimizer
         from typing import Union
         import torch.nn as nn
         model: Union[nn.Module, None] = LSTMModel(input_size=10, hidden_size=8)
         return model, GridSearchThresholdOptimizer()
     def train_and_save_global_cnn_lstm_attention_model(*args, **kwargs) -> Tuple[Union[nn.Module, None], str]:
-        from signals._components.LSTM__class__models import LSTMModel
+        from signals._components.LSTM__class__Models import LSTMModel
         mock_model = LSTMModel(input_size=10, hidden_size=8)
         return mock_model, ""
 
@@ -195,7 +196,7 @@ class TestModelCreation(unittest.TestCase):
         
     def test_create_cnn_lstm_attention_model_lstm_only(self):
         """Test creating LSTM-Attention model only"""
-        from signals._components.LSTM__class__models import LSTMAttentionModel
+        from signals._components.LSTM__class__Models import LSTMAttentionModel
         
         model = create_cnn_lstm_attention_model(
             input_size=10,
@@ -209,7 +210,7 @@ class TestModelCreation(unittest.TestCase):
         
     def test_create_cnn_lstm_attention_model_standard_lstm(self):
         """Test creating standard LSTM model"""
-        from signals._components.LSTM__class__models import LSTMModel
+        from signals._components.LSTM__class__Models import LSTMModel
         
         model = create_cnn_lstm_attention_model(
             input_size=10,
@@ -739,7 +740,7 @@ class TestIntegrationScenarios(unittest.TestCase):
         
         if len(X) > 0:
             # Test model creation
-            model = create_cnn_lstm_model(
+            model = create_cnn_lstm_attention_model(
                 input_size=len(feature_names),
                 look_back=30,
                 output_mode='classification',
@@ -763,7 +764,7 @@ class TestIntegrationScenarios(unittest.TestCase):
         
         if not result_df.empty and 'return_target' in result_df.columns:
             # Test with regression model
-            model = create_cnn_lstm_model(
+            model = create_cnn_lstm_attention_model(
                 input_size=3,  # rsi, macd, ma_20
                 look_back=30,
                 output_mode='regression',

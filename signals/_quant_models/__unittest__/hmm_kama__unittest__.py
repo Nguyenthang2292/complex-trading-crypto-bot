@@ -8,7 +8,7 @@ import warnings
 from dataclasses import dataclass
 
 current_dir = Path(__file__).resolve().parent
-sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
+sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
 
 # Import the function to test using absolute import
 from signals._quant_models.hmm_kama import (

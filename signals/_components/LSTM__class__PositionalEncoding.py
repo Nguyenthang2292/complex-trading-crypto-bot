@@ -4,6 +4,7 @@ import os
 import sys
 import torch
 import torch.nn as nn
+from typing import Optional
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 components_dir = os.path.dirname(current_dir)
@@ -17,22 +18,31 @@ logger = setup_logging(module_name="LSTM__class__PositionalEncoding", log_level=
 
 class PositionalEncoding(nn.Module):
     """
-    Positional encoding for sequence data
+    Positional encoding for sequence data in transformer-based models.
+    
+    Adds position information to the input embedding to help the model understand
+    sequence order. Uses sine and cosine functions of different frequencies for
+    position encoding as described in 'Attention Is All You Need' paper.
+    
+    Args:
+        d_model: Dimension of the model embeddings
+        max_seq_length: Maximum sequence length to pre-compute positions for
+        
+    Raises:
+        ValueError: If d_model or max_seq_length is not positive
     """
     
-    def __init__(self, d_model, max_seq_length=5000):
+    def __init__(self, d_model: int, max_seq_length: int = 5000) -> None:
         super(PositionalEncoding, self).__init__()
         
         if d_model <= 0:
-            raise ValueError("d_model must be positive, got {0}".format(d_model))
+            raise ValueError(f"d_model must be positive, got {d_model}")
         if max_seq_length <= 0:
-            raise ValueError("max_seq_length must be positive, got {0}".format(max_seq_length))
+            raise ValueError(f"max_seq_length must be positive, got {max_seq_length}")
         
         pe = torch.zeros(max_seq_length, d_model)
         position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
-        
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * 
-                           (-np.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
         
         pe[:, 0::2] = torch.sin(position * div_term)
         if d_model % 2 == 1:  # Handle odd d_model
@@ -43,12 +53,25 @@ class PositionalEncoding(nn.Module):
         # Store as buffer without extra dimensions
         self.register_buffer('pe', pe.unsqueeze(0))  # Shape: [1, max_seq_length, d_model]
         
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Add positional encoding to the input tensor.
+        
+        Args:
+            x: Input tensor with shape [batch, seq_len, d_model]
+            
+        Returns:
+            torch.Tensor: Input with positional encoding added
+            
+        Raises:
+            ValueError: If input is not a 3D tensor
+        """
         if x.dim() != 3:
-            raise ValueError("Input must be 3D tensor [batch, seq_len, d_model], got shape {0}".format(x.shape))
+            raise ValueError(f"Input must be 3D tensor [batch, seq_len, d_model], got shape {x.shape}")
             
         seq_len = x.size(1)
         device = x.device
+        
         # If sequence length exceeds stored positional encoding, compute extra positions
         if seq_len > self.pe.size(1):                                                                               # type: ignore
             extra_len = seq_len - self.pe.size(1)                                                                   # type: ignore

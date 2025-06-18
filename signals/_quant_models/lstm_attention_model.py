@@ -34,7 +34,7 @@ from signals._components._gpu_check_availability import (
     check_gpu_availability, configure_gpu_memory
 )
 from signals._components.LSTM__class__FocalLoss import FocalLoss
-from signals._components.LSTM__class__models import LSTMAttentionModel, LSTMModel
+from signals._components.LSTM__class__Models import LSTMAttentionModel, LSTMModel
 from signals._components._generate_indicator_features import _generate_indicator_features
 from signals._components.LSTM__function__create_balanced_target import create_balanced_target
 from signals._components.LSTM__function__evaluate_models import (evaluate_model_in_batches, evaluate_model_with_confidence)
@@ -43,14 +43,18 @@ from signals.signals_cnn_lstm_attention import create_cnn_lstm_attention_model
 
 def load_lstm_attention_model(model_path: Optional[Path] = None, use_attention: bool = True) -> Optional[nn.Module]:
     """
-    Load LSTM model with or without attention.
+    Load PyTorch LSTM model with optional attention mechanism.
     
     Args:
-        model_path: Path to the model file
-        use_attention: Whether to load attention model
+        model_path: Path to model file. If None, uses default path based on use_attention flag
+        use_attention: Whether to load attention-enabled model (affects default path selection)
         
     Returns:
-        Loaded model or None if failed
+        Loaded PyTorch model in eval mode, or None if loading fails
+        
+    Raises:
+        FileNotFoundError: If model file doesn't exist
+        RuntimeError: If model state dict loading fails
     """
     if model_path is None:
         model_filename = "lstm_attention_model.pth" if use_attention else "lstm_model.pth"
@@ -59,29 +63,23 @@ def load_lstm_attention_model(model_path: Optional[Path] = None, use_attention: 
     try:
         checkpoint = torch.load(model_path, map_location='cpu')
         input_size = checkpoint['input_size']
-        
-        # Check if model uses attention
         model_has_attention = checkpoint.get('use_attention', False)
         attention_heads = checkpoint.get('attention_heads', 8)
         
         if model_has_attention:
-            model = LSTMAttentionModel(
-                input_size=input_size,
-                num_heads=attention_heads
-            )
-            logger.model("Loading LSTM-Attention model with {0} heads".format(attention_heads))
+            model = LSTMAttentionModel(input_size=input_size, num_heads=attention_heads)
+            logger.model(f"Loading LSTM-Attention model with {attention_heads} heads")
         else:
             model = LSTMModel(input_size=input_size)
             logger.model("Loading standard LSTM model")
         
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
-        
-        logger.model("Successfully loaded model from {0}".format(model_path))
+        logger.model(f"Successfully loaded model from {model_path}")
         return model
         
     except Exception as e:
-        logger.error("Error loading model: {0}".format(e))
+        logger.error(f"Error loading model: {e}")
         return None
 
 def get_latest_lstm_attention_signal(df_market_data: pd.DataFrame, model: nn.Module) -> str:
@@ -93,27 +91,18 @@ def get_latest_lstm_attention_signal(df_market_data: pd.DataFrame, model: nn.Mod
         model: Trained LSTM/LSTM-Attention model
         
     Returns:
-        Trading signal: SIGNAL_LONG, SIGNAL_SHORT, or SIGNAL_NEUTRAL
+        str: Trading signal (SIGNAL_LONG, SIGNAL_SHORT, or SIGNAL_NEUTRAL)
     """
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     
-    if df_market_data.empty:
-        logger.warning("Empty input DataFrame for signal generation")
-        return SIGNAL_NEUTRAL
-    
-    required_cols = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]
-    if not all(col in df_market_data.columns for col in required_cols):
-        logger.warning(f"Missing OHLC columns. Available: {list(df_market_data.columns)}, Required: {required_cols}")
+    if df_market_data.empty or not all(col in df_market_data.columns for col in [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE]):
+        logger.warning(f"Invalid input data. Available columns: {list(df_market_data.columns) if not df_market_data.empty else 'None'}")
         return SIGNAL_NEUTRAL
 
     df_features = _generate_indicator_features(df_market_data.copy())
-    if df_features.empty:
-        logger.warning("Empty DataFrame after feature calculation")
-        return SIGNAL_NEUTRAL
-        
-    if len(df_features) < WINDOW_SIZE_LSTM:
-        logger.warning(f"Insufficient data: {len(df_features)} < {WINDOW_SIZE_LSTM}")
+    if df_features.empty or len(df_features) < WINDOW_SIZE_LSTM:
+        logger.warning(f"Insufficient data after feature generation: {len(df_features) if not df_features.empty else 0} < {WINDOW_SIZE_LSTM}")
         return SIGNAL_NEUTRAL
     
     available_features = [col for col in MODEL_FEATURES if col in df_features.columns]
@@ -124,11 +113,11 @@ def get_latest_lstm_attention_signal(df_market_data: pd.DataFrame, model: nn.Mod
     if len(available_features) < len(MODEL_FEATURES):
         logger.warning(f"Using {len(available_features)}/{len(MODEL_FEATURES)} features")
         
-    scaler = MinMaxScaler()
-    scaled_features = scaler.fit_transform(df_features[available_features])
-    input_window = torch.FloatTensor([scaled_features[-WINDOW_SIZE_LSTM:]]).to(device)
-    
     try:
+        scaler = MinMaxScaler()
+        scaled_features = scaler.fit_transform(df_features[available_features])
+        input_window = torch.FloatTensor([scaled_features[-WINDOW_SIZE_LSTM:]]).to(device)
+        
         model.eval()
         with torch.no_grad():
             prediction_probs = model(input_window)[0].cpu().numpy()
@@ -137,7 +126,7 @@ def get_latest_lstm_attention_signal(df_market_data: pd.DataFrame, model: nn.Mod
         confidence = np.max(prediction_probs)
         
         model_type = "LSTM-Attention" if isinstance(model, LSTMAttentionModel) else "LSTM"
-        device_info = "GPU" if torch.cuda.is_available() else "CPU"
+        device_info = "GPU" if device.type == 'cuda' else "CPU"
         logger.signal(f"{model_type} ({device_info}) - Class: {predicted_class}, Confidence: {confidence:.3f}")
         
         if confidence >= CONFIDENCE_THRESHOLD:
@@ -158,8 +147,13 @@ def get_latest_lstm_attention_signal(df_market_data: pd.DataFrame, model: nn.Mod
         logger.error(f"Error generating LSTM signal: {e}")
         return SIGNAL_NEUTRAL
 
-def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, epochs: int = DEFAULT_EPOCHS, 
-                    use_early_stopping: bool = True, use_attention: bool = True, attention_heads: int = GPU_MODEL_CONFIG['nhead']) -> Tuple[Optional[nn.Module], pd.DataFrame]:   
+def train_lstm_attention_model(
+    df_input: pd.DataFrame, 
+    save_model: bool = True, 
+    epochs: int = DEFAULT_EPOCHS, 
+    use_early_stopping: bool = True, 
+    use_attention: bool = True, 
+    attention_heads: int = GPU_MODEL_CONFIG['nhead']) -> Tuple[Optional[nn.Module], pd.DataFrame]:   
     """
     Trains a PyTorch LSTM model with optional attention mechanism.
     
@@ -172,14 +166,15 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
         attention_heads: Number of attention heads for attention mechanism
         
     Returns:
-        Tuple of (trained_model, evaluation_results_dataframe)
+        Tuple[Optional[nn.Module], pd.DataFrame]: (trained_model, evaluation_results_dataframe)
         
     Raises:
         ValueError: If input data is insufficient or invalid
         RuntimeError: If CUDA/GPU operations fail during training
     """
-    model, best_model_state, scaler_amp, results = None, None, None, pd.DataFrame()
-    gpu_available, use_mixed_precision = False, False
+    model, best_model_state, scaler_amp = None, None, None
+    results = pd.DataFrame()
+    gpu_available = use_mixed_precision = False
     device = torch.device('cpu')
     
     # GPU setup and device configuration
@@ -190,42 +185,35 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
             if torch.cuda.get_device_capability(0)[0] >= 7:
                 use_mixed_precision = True
                 scaler_amp = GradScaler('cuda')
-                logger.gpu("Using mixed precision training for faster performance")
+                logger.gpu("Using mixed precision training")
             
-            # Test GPU functionality
-            try:
-                torch.ones(1, device=device)
-                logger.success("GPU device allocation test passed")
-            except Exception as device_test_error:
-                logger.error(f"GPU device test failed: {device_test_error}")
-                logger.warning("Falling back to CPU due to GPU issues")
-                device, gpu_available, use_mixed_precision = torch.device('cpu'), False, False
-        else:
-            logger.info("Using CPU for LSTM training")
+            torch.ones(1, device=device)
+            logger.success("GPU device allocation test passed")
     except Exception as gpu_error:
         logger.error(f"GPU setup failed: {gpu_error}")
-        device, gpu_available, use_mixed_precision = torch.device('cpu'), False, False
+        device = gpu_available = use_mixed_precision = torch.device('cpu')
+        if gpu_error:
+            logger.warning("Falling back to CPU")
 
-    # Input validation and data preprocessing
+    # Input validation and preprocessing
     if df_input.empty:
-        raise ValueError("Input DataFrame is empty. Cannot train model.")
+        raise ValueError("Input DataFrame is empty")
     
     df = _generate_indicator_features(df_input)
     df = create_balanced_target(df, threshold=TARGET_THRESHOLD_LSTM, neutral_zone=NEUTRAL_ZONE_LSTM)
     df.dropna(inplace=True)
     
     if len(df) < MIN_DATA_POINTS:
-        raise ValueError(f"Insufficient data after preprocessing: {len(df)} rows. Need at least {MIN_DATA_POINTS} rows.")
+        raise ValueError(f"Insufficient data: {len(df)} rows. Need at least {MIN_DATA_POINTS}")
     
-    # Feature preparation and validation
+    # Feature validation
     available_features = [col for col in MODEL_FEATURES if col in df.columns]
     if not available_features:
-        logger.error(f"No valid features found from {MODEL_FEATURES} in dataframe columns: {df.columns.tolist()}")
-        raise ValueError("No valid features available for model training")
+        raise ValueError("No valid features available")
     
     if len(available_features) < len(MODEL_FEATURES):
         missing_features = [col for col in MODEL_FEATURES if col not in df.columns]
-        logger.warning(f"Missing features: {missing_features}. Using {len(available_features)} of {len(MODEL_FEATURES)} features")
+        logger.warning(f"Missing features: {missing_features}")
 
     # Feature scaling and sequence creation
     scaler = MinMaxScaler()
@@ -237,32 +225,30 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
         y.append(df['Target'].iloc[i])
     
     X_array, y_array = np.array(X), np.array(y)
-    
     if len(X_array) == 0:
-        raise ValueError("No sequences created. Data too short for LSTM window.")
+        raise ValueError("No sequences created - data too short")
     
     # Data splitting and tensor conversion
     split = int(TRAIN_TEST_SPLIT * len(X_array))
     X_train, X_test = X_array[:split], X_array[split:]
     y_train, y_test = y_array[:split], y_array[split:]
     
-    # Convert to PyTorch tensors (shift labels from -1,0,1 to 0,1,2)
     X_train_tensor = torch.FloatTensor(X_train)
     X_test_tensor = torch.FloatTensor(X_test)
-    y_train_tensor = torch.LongTensor(y_train + 1)
+    y_train_tensor = torch.LongTensor(y_train + 1)  # Shift labels from -1,0,1 to 0,1,2
     y_test_tensor = torch.LongTensor(y_test + 1)
     
     # Batch size optimization and validation split
     optimal_batch_size = get_optimal_batch_size(device, len(MODEL_FEATURES), WINDOW_SIZE_LSTM)
     if use_attention and gpu_available:
         optimal_batch_size = max(16, optimal_batch_size // 2)
-        logger.gpu(f"Adjusted batch size for attention model: {optimal_batch_size}")
+        logger.gpu(f"Adjusted batch size for attention: {optimal_batch_size}")
     
     val_split = int(VALIDATION_SPLIT * len(X_train_tensor))
     X_val, y_val = X_train_tensor[-val_split:], y_train_tensor[-val_split:]
     X_train_tensor, y_train_tensor = X_train_tensor[:-val_split], y_train_tensor[:-val_split]
     
-    # DataLoader creation with performance optimization
+    # DataLoader creation
     num_workers = 2 if gpu_available else 0
     train_loader = DataLoader(
         TensorDataset(X_train_tensor, y_train_tensor), 
@@ -277,9 +263,9 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
     
     X_test_tensor, y_test_tensor = X_test_tensor.to(device, non_blocking=True), y_test_tensor.to(device, non_blocking=True)
     
-    # Model creation with error handling
+    # Model creation
     input_size = len(MODEL_FEATURES)
-    model_type = "LSTM-Attention" if use_attention else "LSTM" 
+    model_type = "LSTM-Attention" if use_attention else "LSTM"
     try:
         model = create_cnn_lstm_attention_model(
             input_size=input_size,
@@ -288,30 +274,25 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
             dropout=GPU_MODEL_CONFIG['dropout'] if gpu_available else CPU_MODEL_CONFIG['dropout']
         ).to(device)
         
-        logger.model(f"{model_type} model successfully created and moved to {device}")
+        logger.model(f"{model_type} model created on {device}")
         
     except Exception as model_error:
         if any(keyword in str(model_error).lower() for keyword in ["cudnn", "cuda"]):
-            logger.error(f"CUDA/cuDNN error creating model: {model_error}")
-            logger.info("Attempting CPU fallback...")
-            
-            device, use_mixed_precision = torch.device('cpu'), False
-            try:
-                model = create_cnn_lstm_attention_model(
-                    input_size=input_size, use_attention=use_attention, num_heads=attention_heads,
-                    dropout=CPU_MODEL_CONFIG['dropout']
-                ).to(device)
-                gpu_available = False
-                logger.success("Model successfully created on CPU fallback")
-            except Exception as cpu_model_error:
-                raise ValueError(f"Cannot create LSTM model: {cpu_model_error}")
+            logger.error(f"CUDA error: {model_error}")
+            device = use_mixed_precision = torch.device('cpu')
+            model = create_cnn_lstm_attention_model(
+                input_size=input_size, use_attention=use_attention, num_heads=attention_heads,
+                dropout=CPU_MODEL_CONFIG['dropout']
+            ).to(device)
+            gpu_available = False
+            logger.success("Model created on CPU fallback")
         else:
-            raise ValueError(f"Cannot create LSTM model: {model_error}")
+            raise ValueError(f"Model creation failed: {model_error}")
     
     if model is None:
-        raise ValueError("Model creation failed - model is None")
+        raise ValueError("Model creation failed")
     
-    # Training setup: loss function, optimizer, scheduler
+    # Training setup
     y_train_cpu = y_train_tensor.cpu().numpy()
     unique_classes = np.unique(y_train_cpu)
     class_weights = compute_class_weight('balanced', classes=unique_classes, y=y_train_cpu)
@@ -321,18 +302,14 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
     optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, factor=0.5)
     
-    # Log model parameters
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.model(f"Total parameters: {total_params:,}, Trainable: {trainable_params:,}")
+    logger.model(f"Parameters: {total_params:,} total, {trainable_params:,} trainable")
     
-    # Training loop with early stopping
-    best_val_loss, patience_counter, patience, actual_epochs = float('inf'), 0, 5, 0
-    logger.model(f"Training {model_type} model on {device} with {len(X_train_tensor)} samples for max {epochs} epochs...")
-    logger.model(f"Batch size: {optimal_batch_size}, Mixed precision: {use_mixed_precision}")
-    
-    if use_attention:
-        logger.model(f"Attention heads: {attention_heads}, Positional encoding: enabled")
+    # Training loop
+    best_val_loss = patience_counter = float('inf')
+    patience = actual_epochs = 5
+    logger.model(f"Training {model_type} on {device} with {len(X_train_tensor)} samples")
     
     epoch_times = []
     
@@ -343,7 +320,7 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
             
             # Training phase
             model.train()
-            train_loss, train_correct, train_total = 0.0, 0, 0
+            train_loss = train_correct = train_total = 0
             
             try:
                 for batch_idx, (batch_X, batch_y) in enumerate(train_loader):
@@ -372,29 +349,24 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
                         logger.performance(f"Epoch {epoch+1}, Batch {batch_idx}/{len(train_loader)}, Loss: {loss.item():.4f}")
                     
             except RuntimeError as runtime_error:
-                error_msg = str(runtime_error).lower()
-                if any(keyword in error_msg for keyword in ["cuda", "gpu", "cudnn"]):
-                    logger.error(f"GPU error during training: {runtime_error}")
-                    logger.info("Switching to CPU training...")
-                    
-                    # CPU fallback
+                if any(keyword in str(runtime_error).lower() for keyword in ["cuda", "gpu", "cudnn"]):
+                    logger.error(f"GPU error: {runtime_error}")
                     device = torch.device('cpu')
                     model = model.cpu()
                     X_test_tensor, y_test_tensor = X_test_tensor.cpu(), y_test_tensor.cpu()
-                    use_mixed_precision, scaler_amp, gpu_available = False, None, False
+                    use_mixed_precision = scaler_amp = gpu_available = False
                     
-                    # Recreate data loaders
                     train_loader = DataLoader(TensorDataset(X_train_tensor, y_train_tensor), batch_size=CPU_BATCH_SIZE, shuffle=True)
                     val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=CPU_BATCH_SIZE, shuffle=False)
                     
-                    logger.success("Successfully switched to CPU training")
+                    logger.success("Switched to CPU training")
                     continue
                 else:
                     raise runtime_error
             
             # Validation phase
             model.eval()
-            val_loss, val_correct, val_total = 0.0, 0, 0
+            val_loss = val_correct = val_total = 0
             
             with torch.no_grad():
                 for batch_X, batch_y in val_loader:
@@ -413,7 +385,7 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
                     val_total += batch_y.size(0)
                     val_correct += int((predicted == batch_y).sum().item())
         
-            # Calculate metrics and update scheduler
+            # Calculate metrics
             train_loss /= len(train_loader)
             val_loss /= len(val_loader)
             train_acc = 100.0 * train_correct / train_total
@@ -424,10 +396,10 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
             scheduler.step(val_loss)
             
             logger.performance(f'Epoch [{epoch+1}/{epochs}] ({epoch_time:.1f}s) - '
-                             f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, '
-                             f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%, LR: {optimizer.param_groups[0]["lr"]:.6f}')
+                             f'Train Loss: {train_loss:.4f}, Acc: {train_acc:.2f}%, '
+                             f'Val Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%')
             
-            # Early stopping logic
+            # Early stopping
             if use_early_stopping:
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -437,7 +409,7 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
                     patience_counter += 1
                     
                 if patience_counter >= patience:
-                    logger.model(f"Early stopping triggered after {epoch+1} epochs")
+                    logger.model(f"Early stopping at epoch {epoch+1}")
                     if best_model_state is not None:
                         model.load_state_dict(best_model_state)
                     break
@@ -445,29 +417,27 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
     except Exception as training_error:
         logger.error(f"Training failed: {training_error}")
         if model is None:
-            raise ValueError(f"Training failed and model is None: {training_error}")
-        logger.warning("Returning partially trained model due to training failure")
+            raise ValueError(f"Training failed: {training_error}")
+        logger.warning("Returning partially trained model")
     
-    # Performance summary and memory cleanup
+    # Training summary
     if epoch_times:
-        avg_epoch_time, total_training_time = float(np.mean(epoch_times)), sum(epoch_times)
-        logger.performance(f"Training completed - Avg epoch time: {avg_epoch_time:.1f}s, Total time: {total_training_time:.1f}s")
+        avg_epoch_time = float(np.mean(epoch_times))
+        total_training_time = sum(epoch_times)
+        logger.performance(f"Training completed - Avg: {avg_epoch_time:.1f}s/epoch, Total: {total_training_time:.1f}s")
     
     if gpu_available and device.type == 'cuda':
-        try:
-            torch.cuda.empty_cache()
-            logger.info("GPU memory cleared after training")
-        except:
-            pass
+        torch.cuda.empty_cache()
+        logger.info("GPU memory cleared")
     
-    logger.model(f"Model training completed after {actual_epochs} epochs on {device}")
+    logger.model(f"Training completed after {actual_epochs} epochs")
     
-    # Model evaluation and results generation
+    # Model evaluation
     if len(X_test_tensor) > 0 and model is not None:
         try:
             model.eval()
             evaluation_batch_size = 32 if gpu_available else 64
-            logger.info(f"Starting model evaluation with batch size: {evaluation_batch_size}")
+            logger.info(f"Evaluating model with batch size: {evaluation_batch_size}")
             
             if gpu_available and device.type == 'cuda':
                 torch.cuda.empty_cache()
@@ -476,11 +446,11 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
                 y_pred_prob = evaluate_model_in_batches(model, X_test_tensor, device, evaluation_batch_size)
                 y_pred_classes = np.argmax(y_pred_prob, axis=1) - 1  # Convert back to -1,0,1
                 y_test_cpu = y_test_tensor.cpu().numpy() - 1
-                logger.success("Model evaluation completed successfully")
+                logger.success("Model evaluation completed")
                 
             except RuntimeError as eval_error:
                 if "out of memory" in str(eval_error).lower():
-                    logger.warning("GPU OOM during evaluation, falling back to CPU")
+                    logger.warning("GPU OOM during evaluation, using CPU")
                     model = model.cpu()
                     X_test_cpu = X_test_tensor.cpu()
                     torch.cuda.empty_cache()
@@ -488,17 +458,16 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
                     y_pred_prob = evaluate_model_in_batches(model, X_test_cpu, torch.device('cpu'), 64)
                     y_pred_classes = np.argmax(y_pred_prob, axis=1) - 1
                     y_test_cpu = y_test_tensor.cpu().numpy() - 1
-                    logger.success("Model evaluation completed on CPU")
+                    logger.success("Evaluation completed on CPU")
                 else:
                     raise eval_error
             
-            # Print evaluation metrics
             logger.analysis("Classification Report:")
             logger.analysis(classification_report(y_test_cpu, y_pred_classes, zero_division=0))
             logger.analysis("Confusion Matrix:")
             logger.analysis(confusion_matrix(y_test_cpu, y_pred_classes))
 
-            # Confidence evaluation with memory management
+            # Confidence evaluation
             logger.analysis("\n" + "="*60)
             logger.analysis("CONFIDENCE THRESHOLD EVALUATION")
             logger.analysis("="*60)
@@ -513,7 +482,8 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
                 evaluate_model_with_confidence(model, X_test_tensor, y_test_cpu, device)
             
             # Create results DataFrame
-            test_start_idx, test_end_idx = split + WINDOW_SIZE_LSTM, split + WINDOW_SIZE_LSTM + len(X_test_tensor)
+            test_start_idx = split + WINDOW_SIZE_LSTM
+            test_end_idx = test_start_idx + len(X_test_tensor)
             
             if test_end_idx <= len(df):
                 test_data = df.iloc[test_start_idx:test_end_idx].reset_index()
@@ -532,16 +502,12 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
                     'Signal_Strength': signal_strength_list
                 })
             else:
-                logger.warning("Not enough test data to create results DataFrame")
+                logger.warning("Insufficient test data for results DataFrame")
 
         except Exception as e:
-            logger.error(f"Error during model evaluation: {e}")
+            logger.error(f"Evaluation error: {e}")
             if gpu_available and device.type == 'cuda':
-                try:
-                    torch.cuda.empty_cache()
-                    logger.info("GPU memory cleared after evaluation error")
-                except:
-                    pass
+                torch.cuda.empty_cache()
 
     # Model saving
     if save_model and model is not None:
@@ -564,8 +530,11 @@ def train_lstm_attention_model(df_input: pd.DataFrame, save_model: bool = True, 
     
     return model, results
 
-def train_and_save_global_lstm_attention_model(combined_df: pd.DataFrame, model_filename: Optional[str] = None,
-                                     use_attention: bool = True, attention_heads: int = GPU_MODEL_CONFIG['nhead']) -> Tuple[Optional[nn.Module], str]:
+def train_and_save_global_lstm_attention_model(
+    combined_df: pd.DataFrame, 
+    model_filename: Optional[str] = None,
+    use_attention: bool = True, 
+    attention_heads: int = GPU_MODEL_CONFIG['nhead']) -> Tuple[Optional[nn.Module], str]:
     """
     Train and save PyTorch LSTM model with optional attention mechanism.
 
@@ -576,12 +545,11 @@ def train_and_save_global_lstm_attention_model(combined_df: pd.DataFrame, model_
         attention_heads: Number of attention heads
 
     Returns:
-        Tuple of (trained_model, saved_path) or (None, "") if training fails
+        Tuple[Optional[nn.Module], str]: (trained_model, saved_path) or (None, "") if training fails
     """
     start_time = time.time()
     
     try:
-        # Setup GPU/CPU configuration
         gpu_available = check_gpu_availability()
         if gpu_available:
             configure_gpu_memory()
@@ -589,17 +557,14 @@ def train_and_save_global_lstm_attention_model(combined_df: pd.DataFrame, model_
         else:
             logger.info("Using CPU for model training")
 
-        # Generate model filename if not provided
         if not model_filename:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
             model_type = "attention" if use_attention else "standard"
             model_filename = f"lstm_{model_type}_model_{timestamp}.pth"
 
-        # Ensure models directory exists and set save path
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         model_path = MODELS_DIR / model_filename
 
-        # Train the model
         logger.model(f"Training LSTM{'-Attention' if use_attention else ''} model...")
         model, _ = train_lstm_attention_model(
             combined_df, 
@@ -612,21 +577,23 @@ def train_and_save_global_lstm_attention_model(combined_df: pd.DataFrame, model_
             logger.error("Model training failed - returned None")
             return None, ""
 
-        # Save trained model with metadata
         logger.model(f"Saving model at: {model_path}")
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'input_size': len(MODEL_FEATURES),
-            'use_attention': use_attention,
-            'attention_heads': attention_heads if use_attention else None
-        }, model_path)
+        try:
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'input_size': len(MODEL_FEATURES),
+                'use_attention': use_attention,
+                'attention_heads': attention_heads if use_attention else None
+            }, model_path)
+            saved_path = str(model_path)
+            logger.performance(f"Model trained and saved in {time.time() - start_time:.2f}s: {model_path}")
+        except Exception as save_error:
+            logger.error(f"Failed to save model: {save_error}")
+            saved_path = ""
 
-        elapsed_time = time.time() - start_time
-        logger.performance(f"Model trained and saved in {elapsed_time:.2f}s: {model_path}")
-
-        return model, str(model_path)
+        return model, saved_path
 
     except Exception as e:
         logger.exception(f"Error during LSTM model training: {e}")
         return None, ""
-    
+

@@ -61,8 +61,8 @@ from livetrade.config import (
 
 from signals._components._gpu_check_availability import (check_gpu_availability, configure_gpu_memory)
 from signals._components.LSTM__class__FocalLoss import FocalLoss
-from signals._components.LSTM__class__grid_search_threshold_optimizer import GridSearchThresholdOptimizer
-from signals._components.LSTM__class__models import (CNNLSTMAttentionModel, LSTMModel, LSTMAttentionModel)
+from signals._components.LSTM__class__GridSearchThresholdOptimizer import GridSearchThresholdOptimizer
+from signals._components.LSTM__class__Models import (CNNLSTMAttentionModel, LSTMModel, LSTMAttentionModel)
 from signals._components._generate_indicator_features import _generate_indicator_features
 from signals._components.LSTM__function__create_balanced_target import create_balanced_target
 from signals._components.LSTM__function__get_optimal_batch_size import get_optimal_batch_size

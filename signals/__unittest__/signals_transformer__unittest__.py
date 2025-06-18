@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 # Add the parent directory to sys.path to allow importing from config
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Import the module to test
 from signals.signals_transformer import (
@@ -38,7 +38,7 @@ class TestTechnicalIndicators(unittest.TestCase):
     def setUp(self):
         """Set up test data"""
         np.random.seed(42)
-        dates = pd.date_range('2023-01-01', periods=100, freq='1H')
+        dates = pd.date_range('2023-01-01', periods=100, freq='1h')
         self.df = pd.DataFrame({
             'open': np.random.uniform(100, 110, 100),
             'high': np.random.uniform(110, 120, 100),
@@ -247,7 +247,7 @@ class TestSignalGeneration(unittest.TestCase):
         np.random.seed(42)
         
         # Create realistic price data
-        dates = pd.date_range('2023-01-01', periods=100, freq='1H')
+        dates = pd.date_range('2023-01-01', periods=100, freq='1h')
         self.df = pd.DataFrame({
             'open': np.random.uniform(100, 110, 100),
             'high': np.random.uniform(110, 120, 100),
@@ -268,7 +268,7 @@ class TestSignalGeneration(unittest.TestCase):
         
         self.feature_cols = ['close', 'rsi', 'macd', 'macd_signal', 'ma_20_slope']
     
-    @patch('signals._quant_models.__function__LSTM_calculate_features._calculate_features')
+    @patch('signals._components._generate_indicator_features._generate_indicator_features')
     def test_get_latest_transformer_signal_long(self, mock_calculate_features):
         """Test long signal generation"""
         # Setup mock to return DataFrame with indicators
@@ -318,7 +318,7 @@ class TestSignalGeneration(unittest.TestCase):
         """Test with insufficient data"""
         small_df = self.df.head(5)  # Less than required sequence length
         
-        with patch('signals._quant_models.__function__LSTM_calculate_features._calculate_features', return_value=small_df):
+        with patch('signals._components._generate_indicator_features._generate_indicator_features', return_value=small_df):
             signal = get_latest_transformer_signal(
                 small_df, 
                 self.mock_model, 
@@ -549,7 +549,7 @@ class TestSignalGenerationEdgeCases(unittest.TestCase):
     def setUp(self):
         """Set up test data"""
         np.random.seed(42)
-        dates = pd.date_range('2023-01-01', periods=100, freq='1H')
+        dates = pd.date_range('2023-01-01', periods=100, freq='1h')
         self.df = pd.DataFrame({
             'open': np.random.uniform(100, 110, 100),
             'high': np.random.uniform(110, 120, 100),
@@ -571,7 +571,7 @@ class TestSignalGenerationEdgeCases(unittest.TestCase):
         """Test signal generation with custom thresholds"""
         custom_thresholds = (0.05, -0.05)  # Custom buy/sell thresholds
         
-        with patch('signals._quant_models.__function__LSTM_calculate_features._calculate_features') as mock_calculate_features, \
+        with patch('signals._components._generate_indicator_features._generate_indicator_features') as mock_calculate_features, \
              patch('torch.tensor'), \
              patch('torch.no_grad'), \
              patch.object(self.mock_model, '__call__', return_value=Mock(cpu=Mock(return_value=Mock(numpy=Mock(return_value=np.array([[0.8]])))))):
@@ -603,7 +603,7 @@ class TestSignalGenerationEdgeCases(unittest.TestCase):
     
     def test_get_signal_with_extreme_prediction(self):
         """Test signal generation with extreme price prediction"""
-        with patch('signals._quant_models.__function__LSTM_calculate_features._calculate_features') as mock_calculate_features, \
+        with patch('signals._components._generate_indicator_features._generate_indicator_features') as mock_calculate_features, \
              patch('torch.tensor'), \
              patch('torch.no_grad'), \
              patch.object(self.mock_model, '__call__', return_value=Mock(cpu=Mock(return_value=Mock(numpy=Mock(return_value=np.array([[100.0]])))))):  # Extreme prediction

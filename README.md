@@ -13,8 +13,8 @@
     - Obtain your Binance API credentials
     - Configure the API keys in `livetrade/_components/_tick_processor.py`:
       ```python
-      API_KEY = 'xxxxxxxxxxxxxxxxxxxx'
-      API_SECRET = 'yyyyyyyyyyyyyyyyyyyyy'
+      API_KEY = 'xxxxxxxxxxxxxxxxxxxx_1'
+      API_SECRET = 'xxxxxxxxxxxxxxxxxxxx_2'
       ```
 
 3. **Run the Bot**

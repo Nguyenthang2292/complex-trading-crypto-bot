@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 
 current_dir = Path(__file__).resolve().parent
-sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
+sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
 
 from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
 from signals._quant_models.hmm_high_order import (

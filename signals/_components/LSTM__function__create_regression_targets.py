@@ -1,46 +1,57 @@
 import logging
 import numpy as np
-import os
 import sys
+import pandas as pd
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-components_dir = os.path.dirname(current_dir)
-signals_dir = os.path.dirname(components_dir)
-if signals_dir not in sys.path:
-    sys.path.insert(0, signals_dir)
+from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent)) if str(Path(__file__).parent.parent.parent) not in sys.path else None
 
 from utilities._logger import setup_logging
-# Initialize logger for LSTM Attention module
-logger = setup_logging(module_name="_create_regression_targets", log_level=logging.DEBUG)
+logger = setup_logging(module_name="LSTM__function__create_regression_targets", log_level=logging.DEBUG)
 
-def create_regression_targets(df, target_col='close', future_shift=-1):
+def create_regression_targets(
+    df: pd.DataFrame, 
+    target_col: str = 'close', 
+    future_shift: int = -1
+) -> pd.DataFrame:
     """
-    Create regression targets (future returns)
+    Create regression targets (future returns) for time series prediction.
+    
+    This function calculates future returns based on price movements over a specified
+    time shift. The returns are computed as percentage changes and clipped to remove
+    extreme outliers that could destabilize model training.
+    
+    Formula: return = (future_price - current_price) / current_price
     
     Args:
-        df: Input DataFrame
-        target_col: Column to calculate returns from
-        future_shift: Periods to shift for future returns (negative for future)
+        df: Input DataFrame containing price data
+        target_col: Column name to calculate returns from (typically 'close')
+        future_shift: Number of periods to shift for future returns 
+                     (negative values look forward, positive look backward)
         
     Returns:
-        DataFrame with 'return_target' column
+        DataFrame with added 'return_target' column containing clipped percentage returns
+        
+    Raises:
+        Error: If target column is not found in DataFrame
     """
     df = df.copy()
     
     if target_col not in df.columns:
-        logger.error("Target column '{0}' not found".format(target_col))
+        logger.error(f"Target column '{target_col}' not found")
         return df
     
-    # Calculate future returns: (price_t+1 - price_t) / price_t
-    future_prices = df[target_col].shift(future_shift)
+    # Calculate future returns: (price_t+shift - price_t) / price_t
     current_prices = df[target_col]
+    future_prices = current_prices.shift(future_shift)
     
     df['return_target'] = (future_prices - current_prices) / current_prices
     
-    # Remove outliers (returns > 10%)
+    # Remove outliers by clipping returns to [-10%, +10%] range
     df['return_target'] = np.clip(df['return_target'], -0.1, 0.1)
     
-    logger.model("Created regression targets, mean return: {0:.4f}, std: {1:.4f}".format(
-        df['return_target'].mean(), df['return_target'].std()))
+    # Log statistics for monitoring
+    mean_return = df['return_target'].mean()
+    std_return = df['return_target'].std()
+    logger.debug(f"Created regression targets, mean return: {mean_return:.4f}, std: {std_return:.4f}")
     
     return df
