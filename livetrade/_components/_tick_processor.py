@@ -5,6 +5,7 @@ from time import sleep
 from typing import Dict, Optional, List
 import json  
 from binance.spot import Spot as Client
+# from binance.cm_futures import CMFutures
 
 from livetrade.config_api import API_KEY, API_SECRET
 
@@ -15,6 +16,11 @@ class tick_processor():
             api_key=API_KEY,
             api_secret=API_SECRET,
         )
+        
+        # self.futures_client = CMFutures(
+        #     api_key=API_KEY,
+        #     api_secret=API_SECRET,
+        # )
 
         self.df_cache = {}
         self.last_open_time = datetime.now(timezone.utc)
