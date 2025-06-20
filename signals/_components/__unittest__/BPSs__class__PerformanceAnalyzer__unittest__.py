@@ -1,12 +1,11 @@
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 import pandas as pd
 import numpy as np
 import sys
 
-current_dir = Path(__file__).resolve().parent
-sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from signals._components.BPSs__class__PerformanceAnalyzer import PerformanceAnalyzer
 

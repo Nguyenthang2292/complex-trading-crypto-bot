@@ -1,23 +1,31 @@
 import torch
 import logging
-from typing import Optional
+from typing import Optional, Dict, Union, Generator
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
 class GPUResourceManager:
-    def __init__(self):
+    """
+    GPU resource management for PyTorch operations.
+    
+    Provides centralized GPU device management, memory cleanup, and resource monitoring
+    for machine learning workflows with automatic fallback to CPU when CUDA unavailable.
+    """
+    
+    def __init__(self) -> None:
         self._current_device: Optional[torch.device] = None
-        self._is_cuda_available = torch.cuda.is_available()
+        self._is_cuda_available: bool = torch.cuda.is_available()
         
     def initialize(self, device_id: int = 0) -> bool:
-        """Initialize GPU resource management
+        """
+        Initialize GPU resource management with specified device.
         
         Args:
-            device_id: CUDA device ID to use
+            device_id: CUDA device ID to use for operations
             
         Returns:
-            bool: True if initialization successful, False otherwise
+            True if GPU initialization successful, False if falling back to CPU
         """
         if not self._is_cuda_available:
             logger.warning("CUDA is not available. Falling back to CPU.")
@@ -32,35 +40,50 @@ class GPUResourceManager:
             logger.error(f"Failed to initialize GPU resource manager: {e}")
             return False
             
-    def cleanup(self):
-        """Clean up GPU resources"""
-        if not self._is_cuda_available:
+    def cleanup(self) -> None:
+        """Clean up GPU memory cache and synchronize operations."""
+        if not self._is_cuda_available or not self._current_device:
             return
             
         try:
-            if self._current_device:
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                logger.info("GPU resources cleaned up successfully")
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            logger.info("GPU resources cleaned up successfully")
         except Exception as e:
             logger.error(f"Error during GPU cleanup: {e}")
             
     @contextmanager
-    def gpu_scope(self, device_id: int = 0):
-        """Context manager for GPU resource management"""
-        try:
-            if not self.initialize(device_id):
-                yield None
-                return
-                
-            yield self._current_device
+    def gpu_scope(self, device_id: int = 0) -> Generator[Optional[torch.device], None, None]:
+        """
+        Context manager for automatic GPU resource management.
+        
+        Initializes GPU device on entry and cleans up resources on exit.
+        Yields None if GPU initialization fails.
+        
+        Args:
+            device_id: CUDA device ID to use within context
             
+        Yields:
+            torch.device object if successful, None if CPU fallback
+        """
+        try:
+            device_to_yield: Optional[torch.device] = self._current_device if self.initialize(device_id) else None
+            yield device_to_yield
         finally:
             self.cleanup()
             
-    def get_memory_info(self) -> dict:
-        """Get current GPU memory information"""
-        if not self._is_cuda_available:
+    def get_memory_info(self) -> Dict[str, Union[int, str]]:
+        """
+        Get current GPU memory usage statistics.
+        
+        Returns:
+            Dictionary containing memory information:
+            - total: Total device memory in bytes
+            - allocated: Currently allocated memory in bytes  
+            - cached: Reserved memory in bytes
+            - device: Device identifier string
+        """
+        if not self._is_cuda_available or not self._current_device:
             return {
                 'total': 0,
                 'allocated': 0,
@@ -75,8 +98,8 @@ class GPUResourceManager:
             'device': str(self._current_device)
         }
 
-# Singleton instance
-gpu_resource_manager = GPUResourceManager()
+gpu_resource_manager: GPUResourceManager = GPUResourceManager()
 
-def get_gpu_resource_manager():
+def get_gpu_resource_manager() -> GPUResourceManager:
+    """Get the singleton GPU resource manager instance."""
     return gpu_resource_manager

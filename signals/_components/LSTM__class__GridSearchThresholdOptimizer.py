@@ -1,9 +1,10 @@
 import logging
+import numpy as np
 import sys
 from typing import Optional, Tuple
-import numpy as np
 
-from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent)) if str(Path(__file__).parent.parent.parent) not in sys.path else None
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from utilities._logger import setup_logging
 logger = setup_logging(module_name="LSTM__class__GridSearchThresholdOptimizer", log_level=logging.DEBUG)

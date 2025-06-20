@@ -12,7 +12,7 @@ if project_root not in sys.path:
     
 from livetrade._components._tick_processor import tick_processor
 from livetrade._components._load_all_pairs_data import load_all_pairs_data
-from signals.signals_best_performance_symbols import signal_best_performance_pairs
+from signals.signals_best_performance_symbols import signal_best_performance_symbols
 from signals._components._process_signals_random_forest import process_signals_random_forest
 
 from utilities._logger import setup_logging
@@ -61,7 +61,7 @@ def main():
         
         # Step 3: Use signal_best_performance_pairs_long_short to analyze and get top/worst performers
         logger.analysis("Analyzing performance with signal_best_performance_pairs_long_short...")
-        performance_result = signal_best_performance_pairs(
+        performance_result = signal_best_performance_symbols(
             processor=processor,
             symbols=list(preloaded_data.keys()),  # Only analyze symbols we have data for
             timeframes=timeframes,

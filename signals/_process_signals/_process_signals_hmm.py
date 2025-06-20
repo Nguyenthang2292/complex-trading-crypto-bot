@@ -4,59 +4,120 @@ import pandas as pd
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional, Dict
-from tqdm import tqdm 
+from pathlib import Path
+from tqdm import tqdm
+from typing import Any, Dict, List, Optional, Tuple
 
-# Try to import psutil for CPU information, fallback to os if not available
 try:
     import psutil
     _HAS_PSUTIL = True
 except ImportError:
-    import os
     _HAS_PSUTIL = False
 
-# Ensure the project root (the parent of 'livetrade') is in sys.path
-current_file_path = os.path.abspath(__file__)
-current_dir = os.path.dirname(current_file_path)
-signals_dir = os.path.dirname(current_dir)            
-project_root = os.path.dirname(signals_dir)           
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
-from livetrade._components._load_all_symbols_data import load_all_symbols_data
-from signals._process_signals._generate_signals_hmm import generate_signal_hmm
-
+from signals.signals_hmm import hmm_signals
+from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
 from utilities._logger import setup_logging
-logger = setup_logging(module_name="process_signals_hmm", log_level=logging.INFO)
 
-DATAFRAME_COLUMNS = ['Pair', 'SignalTimeframe', 'SignalType']
+logger = setup_logging(module_name="_process_signals_hmm", log_level=logging.DEBUG)
 
-# Thread-safe lock for logging
-_LOG_LOCK = threading.Lock()
+DATAFRAME_COLUMNS: List[str] = ['Symbol', 'SignalTimeframe', 'SignalType']
+_LOG_LOCK: threading.Lock = threading.Lock()
+
 
 def _get_cpu_count() -> int:
-    """Get CPU count using available methods."""
+    """Get optimal CPU count using available system information."""
     try:
-        if _HAS_PSUTIL:
-            import psutil
-            return psutil.cpu_count() or 4
-        else:
-            return os.cpu_count() or 4
+        return psutil.cpu_count() if _HAS_PSUTIL else (os.cpu_count() or 4)
     except Exception:
-        return 4  # Safe fallback
+        return 4
 
-def _process_symbol_worker(symbol: str, symbol_data_for_tfs: Optional[Dict[str, pd.DataFrame]], 
-                        actual_timeframes_to_scan: List[str], strict_mode: bool,
-                        include_long_signals: bool = True, include_short_signals: bool = True) -> Optional[Dict[str, str]]:
+def _generate_signal_hmm(pair: str, 
+                        df: pd.DataFrame, 
+                        strict_mode: bool = False) -> Tuple[str, Optional[int], Optional[float]]:
+    """
+    Generate HMM-based trading signals for a cryptocurrency pair.
+    
+    Combines RSI and HMM analysis to generate trading signals. Returns LONG signal (1)
+    when RSI > 60 and HMM indicates bullish, SHORT signal (-1) when RSI < 40 and HMM 
+    indicates bearish, otherwise no signal (None).
+    
+    Args:
+        pair: Trading pair symbol identifier
+        df: OHLC price DataFrame with required columns ['High', 'Low', 'close']
+        strict_mode: Enable strict HMM parameter mode for conservative signals
+        
+    Returns:
+        Tuple containing (pair_name, signal_value, current_price) where:
+        - signal_value: 1 for LONG, -1 for SHORT, None for no signal
+        - current_price: Latest close price or None if error
+    """
+    try:
+        if 'close' not in df.columns:
+            logger.data(f"{pair}: Missing required 'close' column")
+            return pair, None, None
+            
+        import pandas_ta as ta
+        df['rsi'] = ta.rsi(df['close'], length=14)
+        
+        if df['rsi'].isna().all() or len(df['rsi'].dropna()) < 14:
+            logger.data(f"{pair}: RSI calculation failed or insufficient data")
+            return pair, None, None
+            
+        latest_rsi: float = df['rsi'].iloc[-1]
+        rsi_signal: Optional[int] = (1 if latest_rsi > 60 else -1 if latest_rsi < 40 else None)
+        
+        logger.analysis(f"{pair}: RSI = {latest_rsi:.2f}, Signal: {rsi_signal}")
+        
+        if len(df) < 50:
+            logger.data(f"{pair}: Insufficient data for HMM analysis ({len(df)} points)")
+            return pair, None, None
+            
+        current_close: float = df['close'].iloc[-1]
+        params = OptimizingParameters()
+        params.strict_mode = strict_mode
+        
+        high_order_signal, hmm_kama_signal = hmm_signals(df, optimizing_params=params)
+        
+        if high_order_signal is None or hmm_kama_signal is None:
+            logger.model(f"{pair}: Invalid HMM signals")
+            return pair, None, current_close
+            
+        hmm_signal: int = (1 if (high_order_signal == 1 or hmm_kama_signal == 1) 
+                          else -1 if (high_order_signal == -1 or hmm_kama_signal == -1) 
+                          else 0)
+        
+        logger.model(f"{pair}: HMM signals - High Order: {high_order_signal}, KAMA: {hmm_kama_signal}, Combined: {hmm_signal}")
+        
+        score: int = (2 if hmm_signal == 1 else -2 if hmm_signal == -1 else 0) + (1 if rsi_signal == 1 else -1 if rsi_signal == -1 else 0)
+        final_signal: Optional[int] = 1 if score >= 2 else -1 if score <= -2 else None
+        
+        return pair, final_signal, current_close
+        
+    except Exception as e:
+        logger.error(f"Error analyzing {pair}: {str(e)}")
+        return pair, None, None
+
+def _process_symbol_worker(symbol: str, 
+                           symbol_data_for_tfs: Optional[Dict[str, pd.DataFrame]], 
+                          actual_timeframes_to_scan: List[str], 
+                          strict_mode: bool,
+                          include_long_signals: bool = True, 
+                          include_short_signals: bool = True) -> Optional[Dict[str, str]]:
     """
     Worker function to process a single symbol for HMM signals.
-    Thread-safe function that can be used in parallel processing.
+    
+    Thread-safe function that processes a symbol across multiple timeframes to find
+    trading signals using HMM analysis. Returns the first valid signal found.
     
     Args:
         symbol: Symbol name to process
-        symbol_data_for_tfs: Dictionary of timeframe data for this symbol
+        symbol_data_for_tfs: Dictionary mapping timeframes to DataFrames for this symbol
         actual_timeframes_to_scan: List of timeframes to scan in priority order
-        strict_mode: Whether to use strict HMM mode
+        strict_mode: Whether to use strict HMM mode for conservative signals
         include_long_signals: Whether to include LONG signals (signal == 1)
         include_short_signals: Whether to include SHORT signals (signal == -1)
         
@@ -69,7 +130,6 @@ def _process_symbol_worker(symbol: str, symbol_data_for_tfs: Optional[Dict[str, 
                 logger.warning(f"  No data or incorrect data format for {symbol}. Skipping.")
             return None
         
-        # Find signals on prioritized timeframes
         for tf_scan in actual_timeframes_to_scan:
             df_current_tf = symbol_data_for_tfs.get(tf_scan)
 
@@ -79,32 +139,27 @@ def _process_symbol_worker(symbol: str, symbol_data_for_tfs: Optional[Dict[str, 
                 continue
 
             try:
-                # Use generate_signal_hmm to get HMM signal
-                result = generate_signal_hmm(symbol, df_current_tf, strict_mode)
-                if result is None or len(result) != 3:  # Changed from 5 to 3
+                result = _generate_signal_hmm(symbol, df_current_tf, strict_mode)
+                if result is None or len(result) != 3:
                     with _LOG_LOCK:
                         logger.debug(f"  Invalid result for {symbol} on {tf_scan}")
                     continue
                 
-                # Unpack the 3-element tuple correctly
-                _, signal, _ = result  # (pair, signal, current_close)
+                _, signal, _ = result
                 
-                # Process based on signal value and user preferences
                 if signal == 1 and include_long_signals:
-                    # LONG signal
                     with _LOG_LOCK:
                         logger.signal(f"  LONG signal found for {symbol} on {tf_scan}")
                     return {
-                        'Pair': symbol,
+                        'Symbol': symbol,
                         'SignalTimeframe': tf_scan,
                         'SignalType': 'LONG'
                     }
                 elif signal == -1 and include_short_signals:
-                    # SHORT signal
                     with _LOG_LOCK:
                         logger.signal(f"  SHORT signal found for {symbol} on {tf_scan}")
                     return {
-                        'Pair': symbol,
+                        'Symbol': symbol,
                         'SignalTimeframe': tf_scan,
                         'SignalType': 'SHORT'
                     }
@@ -134,25 +189,24 @@ def process_signals_hmm(
     include_long_signals: bool = True,
     include_short_signals: bool = True,
     max_workers: int = 4  
-):
+) -> pd.DataFrame:
     """
-    Processes trading signals for cryptocurrency symbols using HMM models.
-    Returns symbols with LONG and/or SHORT signals based on parameters.
+    Process trading signals for cryptocurrency symbols using HMM models.
+    
+    Analyzes symbols across multiple timeframes using Hidden Markov Models combined with
+    RSI indicators to generate LONG/SHORT trading signals with parallel processing.
     
     Args:
-        preloaded_data (Dict[str, Dict[str, pd.DataFrame]]): Pre-loaded symbol data in format:
-                                                        {symbol: {timeframe: dataframe}}
-        timeframes_to_scan (List[str]): Specific timeframes to scan, in order of priority. 
-                                                Defaults to ['1h', '4h', '1d'].
-        strict_mode (bool): Whether to use STRICT-HMM mode for HMM models.
-        include_long_signals (bool): Whether to include LONG signals (signal == 1).
-        include_short_signals (bool): Whether to include SHORT signals (signal == -1).
-        max_workers (int): Maximum number of worker threads for parallel processing.
+        preloaded_data: Pre-loaded symbol data in format {symbol: {timeframe: dataframe}}
+        timeframes_to_scan: Specific timeframes to scan, in priority order
+        strict_mode: Whether to use STRICT-HMM mode for conservative signals
+        include_long_signals: Whether to include LONG signals (signal == 1)
+        include_short_signals: Whether to include SHORT signals (signal == -1)
+        max_workers: Maximum number of worker threads for parallel processing
     
     Returns:
-        pd.DataFrame: DataFrame containing symbols with signals, columns ['Pair', 'SignalTimeframe', 'SignalType'].
+        DataFrame containing symbols with signals, columns ['Symbol', 'SignalTimeframe', 'SignalType']
     """
-    # Validate signal type parameters
     if not include_long_signals and not include_short_signals:
         logger.warning("Both include_long_signals and include_short_signals are False. No signals will be processed.")
         return pd.DataFrame([], columns=DATAFRAME_COLUMNS)
@@ -169,12 +223,10 @@ def process_signals_hmm(
     logger.config(f"Signal types enabled: {', '.join(signal_types)}")
     logger.model("===============================================")
 
-    # Validate input data
     if not preloaded_data or not isinstance(preloaded_data, dict):
         logger.error("No preloaded_data provided or invalid format. Expected Dict[str, Dict[str, pd.DataFrame]]")
         return pd.DataFrame([], columns=DATAFRAME_COLUMNS)    
     
-    # Initialize parameters with defaults
     actual_timeframes_to_scan = timeframes_to_scan if timeframes_to_scan is not None else ['1h', '4h', '1d']
     logger.config(f"Using {'default' if timeframes_to_scan is None else 'specified'} timeframes for HMM scan (priority order): {actual_timeframes_to_scan}")
     
@@ -185,25 +237,20 @@ def process_signals_hmm(
     symbols_to_analyze = list(preloaded_data.keys())
     logger.analysis(f"Analyzing {len(symbols_to_analyze)} crypto symbols from preloaded data.")    
     
-    # Use provided max_workers parameter or calculate optimal number (80% of CPU cores)
     if max_workers is None or max_workers <= 0:
         cpu_count = _get_cpu_count()
-        optimal_workers = max(1, int(cpu_count * 0.8))
-        max_workers = optimal_workers
+        max_workers = max(1, int(cpu_count * 0.8))
         logger.process(f"Using {max_workers} worker threads for parallel processing (80% of {cpu_count} CPU cores)")
     else:
         logger.process(f"Using {max_workers} worker threads for parallel processing (user-specified)")
 
-    # --- Parallel Signal Processing per Symbol ---
     signals_list = []
     
-    # Use ThreadPoolExecutor for parallel processing
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all symbol processing tasks
         future_to_symbol = {}
         for symbol in symbols_to_analyze:
             symbol_data = preloaded_data.get(symbol)
-            if symbol_data is not None:  # Only submit if data exists
+            if symbol_data is not None:
                 future = executor.submit(
                     _process_symbol_worker, 
                     symbol, 
@@ -215,23 +262,21 @@ def process_signals_hmm(
                 )
                 future_to_symbol[future] = symbol
         
-        # Process completed tasks and collect results
-        total_symbols_submitted = len(future_to_symbol)  # Use submitted count instead
+        total_symbols_submitted = len(future_to_symbol)
         
-        # Modern progress bar with black box style
         for future in tqdm(
             as_completed(future_to_symbol), 
             total=total_symbols_submitted, 
             desc=f"⚡ HMM Analysis ({mode_name})", 
             unit="", 
-            ascii=False,  # Enable Unicode for better visuals
+            ascii=False,
             bar_format='{desc}: {percentage:3.0f}%|{bar:30}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
             colour='green',
             ncols=100,
             leave=True,
             dynamic_ncols=True,
-            miniters=1,  # Update frequency
-            maxinterval=0.1  # Max update interval
+            miniters=1,
+            maxinterval=0.1
         ):
             symbol = future_to_symbol[future]
             
@@ -241,11 +286,9 @@ def process_signals_hmm(
                     signals_list.append(result)
                     
             except Exception as e:
-                # Log error but continue processing other symbols
                 logger.error(f"Error processing symbol {symbol}: {e}")
                 continue
 
-    # Count signal types for logging
     long_count = sum(1 for signal in signals_list if signal.get('SignalType') == 'LONG')
     short_count = sum(1 for signal in signals_list if signal.get('SignalType') == 'SHORT')
     
@@ -256,7 +299,9 @@ def process_signals_hmm(
 
     return pd.DataFrame(signals_list) if signals_list else pd.DataFrame([], columns=DATAFRAME_COLUMNS)
 
-def reload_timeframes_for_symbols(processor, symbols: List[str], timeframes: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]:
+def reload_timeframes_for_symbols(processor: Any, 
+                                  symbols: List[str], 
+                                  timeframes: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Reload data for specific symbols with specified timeframes for optimized HMM analysis.
     
@@ -270,16 +315,14 @@ def reload_timeframes_for_symbols(processor, symbols: List[str], timeframes: Lis
     """
     logger.data(f"Reloading data for {len(symbols)} symbols with timeframes: {timeframes}")
     
-    # Import the load_pair_data function
-    from livetrade._components._load_all_pairs_data import load_symbol_data
+    from livetrade._components._load_all_symbols_data import load_symbol_data
     
-    reloaded_data = {}
+    reloaded_data: Dict[str, Dict[str, pd.DataFrame]] = {}
     
     for symbol in symbols:
         try:
             logger.network(f"Reloading timeframes for {symbol}...")
             
-            # Load multi-timeframe data for this symbol
             symbol_data = load_symbol_data(
                 processor=processor,
                 symbol=symbol,
@@ -288,8 +331,7 @@ def reload_timeframes_for_symbols(processor, symbols: List[str], timeframes: Lis
             )
             
             if symbol_data is not None and isinstance(symbol_data, dict):
-                # Verify we have data for all required timeframes
-                valid_timeframes = {}
+                valid_timeframes: Dict[str, pd.DataFrame] = {}
                 for tf in timeframes:
                     if tf in symbol_data and symbol_data[tf] is not None and not symbol_data[tf].empty:
                         valid_timeframes[tf] = symbol_data[tf]

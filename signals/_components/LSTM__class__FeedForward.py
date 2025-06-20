@@ -3,10 +3,10 @@ import sys
 import torch
 import torch.nn as nn
 
-from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent)) if str(Path(__file__).parent.parent.parent) not in sys.path else None
-from utilities._logger import setup_logging
+from pathlib import Path; 
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# Initialize logger for LSTM Attention module
+from utilities._logger import setup_logging
 logger = setup_logging(module_name="LSTM__class__FeedForward", log_level=logging.DEBUG)
 
 class FeedForward(nn.Module):

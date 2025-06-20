@@ -8,7 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
+from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
 from livetrade._components._tick_processor import tick_processor
 from livetrade.config import (
     SIGNAL_LONG_HMM as LONG,
@@ -77,7 +77,7 @@ def main() -> None:
         logger.error(f"Error loading historical data: {e}")
         return
     
-    optimizing_params: OptimizingParametersHMM = OptimizingParametersHMM()
+    optimizing_params: OptimizingParameters = OptimizingParameters()
     
     logger.info("=" * 80)
     logger.model("HMM SIGNAL GENERATION".center(80))

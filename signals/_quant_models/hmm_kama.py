@@ -23,7 +23,7 @@ warnings.filterwarnings('ignore', message='KMeans is known to have a memory leak
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
 
-from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
+from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
 from utilities._logger import setup_logging
 logger = setup_logging('hmm_kama', log_level=logging.DEBUG)
     
@@ -85,7 +85,7 @@ def calculate_kama(prices, window: int = 10, fast: int = 2, slow: int = 30) -> n
     kama_array = np.asarray(kama, dtype=np.float64)
     return np.where(~np.isfinite(kama_array), initial_value, kama_array).astype(np.float64)
 
-def prepare_observations(data: pd.DataFrame, optimizing_params: OptimizingParametersHMM) -> np.ndarray:
+def prepare_observations(data: pd.DataFrame, optimizing_params: OptimizingParameters) -> np.ndarray:
     """Generate observation features optimized specifically for crypto assets."""
     if data.empty or 'close' not in data.columns or len(data) < 10:
         raise ValueError(f"Invalid data: empty={data.empty}, has close={'close' in data.columns}, len={len(data)}")

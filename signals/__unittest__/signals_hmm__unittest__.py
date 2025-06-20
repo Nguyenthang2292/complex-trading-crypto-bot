@@ -8,7 +8,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from signals.signals_hmm import hmm_signals, initialize_ray, Signal
-from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
+from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
 from signals.signals_hmm import Signal
 
 class TestSignalsHMM(unittest.TestCase):
@@ -22,7 +22,7 @@ class TestSignalsHMM(unittest.TestCase):
             'close': [104, 105, 106, 107, 108],
             'volume': [1000, 1100, 1200, 1300, 1400]
         })
-        self.optimizing_params = OptimizingParametersHMM()
+        self.optimizing_params = OptimizingParameters()
     
     @patch('signals.signals_hmm.ray')
     def test_initialize_ray_not_initialized(self, mock_ray):

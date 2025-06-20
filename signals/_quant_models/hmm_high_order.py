@@ -18,7 +18,7 @@ init(autoreset=True)
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
 
-from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
+from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
 from utilities._logger import setup_logging
 
 logger = setup_logging('hmm_high_order', log_level=logging.DEBUG)
@@ -387,7 +387,7 @@ def evaluate_model_accuracy(model, train_states, test_states):
     # Calculate accuracy
     return correct_predictions / len(test_states) if test_states else 0.0
 
-def hmm_high_order(df: pd.DataFrame, train_ratio: float = 0.8, eval_mode: bool = True, optimizing_params: OptimizingParametersHMM = OptimizingParametersHMM()) -> HIGH_ORDER_HMM:
+def hmm_high_order(df: pd.DataFrame, train_ratio: float = 0.8, eval_mode: bool = True, optimizing_params: OptimizingParameters = OptimizingParameters()) -> HIGH_ORDER_HMM:
     """
     Generates and trains a Hidden Markov Model (HMM) using swing points extracted from market price data.
     

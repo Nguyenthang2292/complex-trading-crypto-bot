@@ -17,11 +17,11 @@ from signals._quant_models.hmm_kama import (
     compute_state_using_hmm, compute_state_using_association_rule_mining,
     compute_state_using_k_means, calculate_all_state_durations,
     HMM_KAMA, calculate_composite_scores_association_rule_mining,
-    OptimizingParametersHMM
+    OptimizingParameters
 )
 # Mock OptimizingParameters class for testing
 @dataclass
-class MockOptimizingParameters(OptimizingParametersHMM):
+class MockOptimizingParameters(OptimizingParameters):
     window_kama: int = 10
     fast_kama: int = 2
     slow_kama: int = 30

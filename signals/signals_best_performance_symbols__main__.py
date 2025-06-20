@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from livetrade._components._tick_processor import tick_processor
 from livetrade._components._load_all_symbols_data import load_symbol_data
 from livetrade.config import DEFAULT_TIMEFRAMES
-from signals.signals_best_performance_symbols import (signal_best_performance_pairs, logging_performance_summary)
+from signals.signals_best_performance_symbols import (signal_best_performance_symbols, logging_performance_summary)
 from utilities._logger import setup_logging
 
 logger = setup_logging('signals_best_performance_symbols__main__', log_level=logging.DEBUG)
@@ -60,7 +60,7 @@ def main():
         logger.success(f"Successfully loaded {processed_count}/{len(symbols)} symbols ({error_count} errors)")
         
         # Run performance analysis
-        result = signal_best_performance_pairs(
+        result = signal_best_performance_symbols(
             processor=processor,
             symbols=symbols,
             timeframes=timeframes,

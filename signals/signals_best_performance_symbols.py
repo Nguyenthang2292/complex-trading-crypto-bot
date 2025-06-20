@@ -312,7 +312,7 @@ def _create_result_dict(
     
     return result
   
-def signal_best_performance_pairs(
+def signal_best_performance_symbols(
     processor: tick_processor,
     symbols: Optional[List[str]] = None,
     timeframes: Optional[List[str]] = None,

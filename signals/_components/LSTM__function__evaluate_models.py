@@ -1,53 +1,42 @@
 import logging
 import numpy as np
-import os
 import sys
 import torch
 from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score, precision_score, recall_score)
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-components_dir = os.path.dirname(current_dir)
-signals_dir = os.path.dirname(components_dir)
-if signals_dir not in sys.path:
-    sys.path.insert(0, signals_dir)
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from livetrade.config import (
-    CONFIDENCE_THRESHOLD, 
-    CONFIDENCE_THRESHOLDS, 
-)
-
+from livetrade.config import (CONFIDENCE_THRESHOLD, CONFIDENCE_THRESHOLDS)
 from utilities._logger import setup_logging
 
-# Initialize logger for LSTM Attention module
-logger = setup_logging(module_name="_evaluate_model", log_level=logging.DEBUG)
+logger = setup_logging(module_name="LSTM__function__evaluate_models", log_level=logging.DEBUG)
 
-def apply_confidence_threshold(y_proba, threshold):
+def apply_confidence_threshold(y_proba: np.ndarray, threshold: float) -> np.ndarray:
     """
-    Apply confidence threshold to model predictions to improve reliability.
-    
-    This function converts probability predictions to class labels based on a confidence
-    threshold. If the maximum probability is below the threshold, the prediction defaults
-    to neutral (0).
+    Apply confidence threshold to model predictions for improved reliability.
     
     Args:
-        y_proba (np.ndarray): Array of prediction probabilities for each class
-        threshold (float): Confidence threshold to apply (0.0-1.0)
+        y_proba: Prediction probabilities for each class
+        threshold: Confidence threshold (0.0-1.0)
         
     Returns:
-        np.ndarray: Array of class predictions (-1, 0, 1) after applying threshold
+        Array of class predictions (-1, 0, 1) after applying threshold
     """
-    predictions = []
-    for proba_row in y_proba:
-        max_confidence = np.max(proba_row)
-        if max_confidence >= threshold:
-            predicted_class = np.argmax(proba_row) - 1  # Convert back to -1,0,1
-        else:
-            predicted_class = 0  # NEUTRAL
-        predictions.append(predicted_class)
-    return np.array(predictions)
+    max_confidences = np.max(y_proba, axis=1)
+    predictions = np.where(
+        max_confidences >= threshold,
+        np.argmax(y_proba, axis=1) - 1,
+        0
+    )
+    return predictions
 
-
-def evaluate_model_in_batches(model, X_test, device, batch_size=32):
+def evaluate_model_in_batches(
+    model: torch.nn.Module, 
+    X_test: torch.Tensor, 
+    device: torch.device, 
+    batch_size: int = 32
+) -> np.ndarray:
     """
     Evaluate model in batches to avoid CUDA out of memory errors.
     
@@ -58,12 +47,11 @@ def evaluate_model_in_batches(model, X_test, device, batch_size=32):
         batch_size: Batch size for evaluation
         
     Returns:
-        numpy array: Prediction probabilities
+        Prediction probabilities as numpy array
     """
     model.eval()
     all_predictions = []
     
-    # Process in smaller batches to avoid OOM
     with torch.no_grad():
         for i in range(0, len(X_test), batch_size):
             batch_end = min(i + batch_size, len(X_test))
@@ -73,17 +61,14 @@ def evaluate_model_in_batches(model, X_test, device, batch_size=32):
                 batch_pred = model(batch_X).cpu()
                 all_predictions.append(batch_pred)
                 
-                # Clear intermediate tensors
                 del batch_X, batch_pred
                 
-                # Clear GPU cache periodically
                 if device.type == 'cuda' and i % (batch_size * 10) == 0:
                     torch.cuda.empty_cache()
                     
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
-                    logger.warning("OOM during batch {0}-{1}, reducing batch size".format(i, batch_end))  # Fix: Use consistent formatting
-                    # Try with smaller batch size
+                    logger.warning("OOM during batch {0}-{1}, reducing batch size".format(i, batch_end))
                     if batch_size > 1:
                         smaller_batch = max(1, batch_size // 2)
                         return evaluate_model_in_batches(model, X_test, device, smaller_batch)
@@ -93,31 +78,24 @@ def evaluate_model_in_batches(model, X_test, device, batch_size=32):
                 else:
                     raise e
     
-    # Concatenate all predictions
     return torch.cat(all_predictions, dim=0).numpy()
 
-def evaluate_model_with_confidence(model, X_test, y_test, device):
+def evaluate_model_with_confidence(
+    model: torch.nn.Module, 
+    X_test: torch.Tensor, 
+    y_test: np.ndarray, 
+    device: torch.device
+) -> None:
     """
     Evaluate LSTM model with multiple confidence thresholds for trading signals.
     
-    Performs comprehensive evaluation using various confidence thresholds to assess
-    trading signal reliability and determine optimal settings for live trading.
-    
     Args:
-        model (torch.nn.Module): Trained PyTorch LSTM model
-        X_test (torch.Tensor): Test features (n_samples, sequence_length, n_features)
-        y_test (np.ndarray): Test labels {-1: SELL, 0: NEUTRAL, 1: BUY}
-        device (torch.device): Evaluation device (CPU/CUDA)
-        
-    Returns:
-        None: Logs evaluation results and threshold recommendations
-        
-    Note:
-        Uses batch evaluation to handle GPU memory constraints.
-        Evaluates multiple thresholds from config.CONFIDENCE_THRESHOLDS.
+        model: Trained PyTorch LSTM model
+        X_test: Test features (n_samples, sequence_length, n_features)
+        y_test: Test labels {-1: SELL, 0: NEUTRAL, 1: BUY}
+        device: Evaluation device (CPU/CUDA)
     """
-    # Use batch evaluation to avoid memory issues
-    evaluation_batch_size = 16 if device.type == 'cuda' else 32  # Very small batch for GPU
+    evaluation_batch_size = 16 if device.type == 'cuda' else 32
     
     logger.analysis("Evaluating model with {0} test samples in batches of {1}...".format(
         len(X_test), evaluation_batch_size))
@@ -128,9 +106,8 @@ def evaluate_model_with_confidence(model, X_test, y_test, device):
         logger.error("Failed to evaluate model in batches: {0}".format(e))
         return
     
-    logger.analysis("Test set class distribution: {0}".format(np.bincount(y_test + 1)))  # Shift for counting
+    logger.analysis("Test set class distribution: {0}".format(np.bincount(y_test + 1)))
     
-    # Use config confidence thresholds
     for threshold in CONFIDENCE_THRESHOLDS:
         logger.analysis("\n" + "="*50)
         logger.analysis("CONFIDENCE THRESHOLD: {0:.1%}".format(threshold))
@@ -138,43 +115,31 @@ def evaluate_model_with_confidence(model, X_test, y_test, device):
         
         y_pred = apply_confidence_threshold(y_pred_prob, threshold)
         
-        accuracy = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred, average='macro', zero_division=0)
-        recall = recall_score(y_test, y_pred, average='macro', zero_division=0)
-        f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
+        metrics = {
+            'accuracy': accuracy_score(y_test, y_pred),
+            'precision': precision_score(y_test, y_pred, average='macro', zero_division=0),
+            'recall': recall_score(y_test, y_pred, average='macro', zero_division=0),
+            'f1': f1_score(y_test, y_pred, average='macro', zero_division=0)
+        }
         
-        logger.analysis("Accuracy: {0:.3f}".format(accuracy))
-        logger.analysis("Precision: {0:.3f}".format(precision))
-        logger.analysis("Recall: {0:.3f}".format(recall))
-        logger.analysis("F1-Score: {0:.3f}".format(f1))
+        for metric_name, metric_value in metrics.items():
+            logger.analysis("{0}: {1:.3f}".format(metric_name.capitalize(), metric_value))
         
-        # Signal distribution
-        unique_preds = np.unique(y_pred)
-        signal_counts = np.zeros(3)  # For -1, 0, 1
-        
-        for pred in unique_preds:
-            count = np.sum(y_pred == pred)
-            if pred == -1:
-                signal_counts[0] = count
-            elif pred == 0:
-                signal_counts[1] = count
-            elif pred == 1:
-                signal_counts[2] = count
-        
+        signal_counts = np.array([np.sum(y_pred == i) for i in [-1, 0, 1]])
         total = len(y_pred)
-        logger.analysis("Signal Distribution:")
-        logger.analysis("  SELL (-1): {0:.0f} ({1:.1f}%)".format(signal_counts[0], signal_counts[0]/total*100))
-        logger.analysis("  NEUTRAL (0): {0:.0f} ({1:.1f}%)".format(signal_counts[1], signal_counts[1]/total*100))
-        logger.analysis("  BUY (1): {0:.0f} ({1:.1f}%)".format(signal_counts[2], signal_counts[2]/total*100))
+        signal_labels = ['SELL (-1)', 'NEUTRAL (0)', 'BUY (1)']
         
-        # Confusion Matrix
+        logger.analysis("Signal Distribution:")
+        for i, (label, count) in enumerate(zip(signal_labels, signal_counts)):
+            logger.analysis("  {0}: {1:.0f} ({2:.1f}%)".format(label, count, count/total*100))
+        
         cm = confusion_matrix(y_test, y_pred, labels=[-1, 0, 1])
         logger.analysis("Confusion Matrix:")
         logger.analysis("     SELL  NEUTRAL  BUY")
-        for i, label in enumerate(['SELL', 'NEUTRAL', 'BUY']):
+        cm_labels = ['SELL', 'NEUTRAL', 'BUY']
+        for i, label in enumerate(cm_labels):
             logger.analysis("{0:>8}: {1}".format(label, cm[i]))
         
-        # Trading-specific metrics
         buy_precision = precision_score(y_test, y_pred, labels=[1], average='macro', zero_division=0)
         sell_precision = precision_score(y_test, y_pred, labels=[-1], average='macro', zero_division=0)
         
@@ -182,13 +147,10 @@ def evaluate_model_with_confidence(model, X_test, y_test, device):
         logger.analysis("  BUY Signal Precision: {0:.3f}".format(buy_precision))
         logger.analysis("  SELL Signal Precision: {0:.3f}".format(sell_precision))
         
-        # Calculate trading score
-        buy_freq = signal_counts[2] / total
-        sell_freq = signal_counts[0] / total
+        buy_freq, sell_freq = signal_counts[2] / total, signal_counts[0] / total
         trading_score = (buy_precision * buy_freq + sell_precision * sell_freq) / (buy_freq + sell_freq + 1e-6)
         logger.analysis("  Trading Score: {0:.3f}".format(trading_score))
     
-    # Recommend optimal threshold
     logger.analysis("RECOMMENDATION:")
     logger.analysis("For conservative trading: Use threshold 0.75+ (higher precision, fewer signals)")
     logger.analysis("For active trading: Use threshold 0.60-0.65 (balanced precision/frequency)")

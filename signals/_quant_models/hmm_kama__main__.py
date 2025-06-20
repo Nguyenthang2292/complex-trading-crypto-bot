@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore', message='KMeans is known to have a memory leak
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
 
-from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
+from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
 from signals._quant_models.hmm_kama import hmm_kama
 from utilities._logger import setup_logging
 logger = setup_logging('hmm_kama__main__', log_level=logging.DEBUG)
@@ -78,7 +78,7 @@ if __name__ == "__main__":
                 logger.data(f"Data range: {df.index[0]} to {df.index[-1]}")
                 
                 # Run HMM-KAMA analysis
-                hmm_state = hmm_kama(df, OptimizingParametersHMM())
+                hmm_state = hmm_kama(df, OptimizingParameters())
                 
                 logger.analysis(f"HMM-KAMA Results for {symbol}:")
                 for field, value in vars(hmm_state).items():

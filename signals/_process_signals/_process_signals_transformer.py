@@ -1,18 +1,13 @@
 import logging
-import os
 import pandas as pd
 import sys
-import torch
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Tuple
 import numpy as np
 
-current_file_path = os.path.abspath(__file__)
-current_dir = os.path.dirname(current_file_path)
-signals_dir = os.path.dirname(current_dir)            
-project_root = os.path.dirname(signals_dir)           
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from livetrade.config import (
     MODELS_DIR, 
@@ -29,12 +24,12 @@ from signals.signals_transformer import (
     SIGNAL_SHORT
 )
 from livetrade._components._combine_all_dataframes import combine_all_dataframes
-
+from utilities._gpu_resource_manager import get_gpu_resource_manager
 from utilities._logger import setup_logging
-# Initialize logger with improved format
-logger = setup_logging(module_name="process_signals_transformer", log_level=logging.INFO)
 
-DATAFRAME_COLUMNS = ['Pair', 'SignalTimeframe', 'SignalType']
+logger = setup_logging(module_name="_process_signals_transformer", log_level=logging.DEBUG)
+
+DATAFRAME_COLUMNS = ['Symbol', 'SignalTimeframe', 'SignalType']
 
 def load_latest_transformer_model(models_dir: str) -> Tuple[Optional[Tuple], Optional[str]]:
     """
@@ -105,27 +100,37 @@ def process_signals_transformer(
     include_short_signals: bool = False
 ) -> pd.DataFrame:
     """
-    Processes trading signals for cryptocurrency symbols using a Transformer model.
+    Processes trading signals for cryptocurrency symbols using a Transformer model with GPU resource management.
     Returns symbols with LONG and/or SHORT signals based on parameters.
     
     Args:
-        preloaded_data (Dict[str, Dict[str, pd.DataFrame]]): Pre-loaded symbol data in format:
-                                                        {symbol: {timeframe: dataframe}}
-        timeframes_to_scan (Optional[List[str]]): Specific timeframes to scan, in order of priority. 
-                                                Defaults to ['1h', '4h', '1d'].
-        trained_model_data (Optional[Tuple]): Pre-trained Transformer model data tuple 
-                                            (model, scaler, feature_cols, target_idx). If None,
-                                            it will be loaded from `model_path` or a new model 
-                                            will be trained if `auto_train_if_missing` is True.
-        model_path (Optional[Union[str, Path]]): Path to the saved model file. If None and 
-                                               `trained_model_data` is None, a default location will be used.
-        auto_train_if_missing (bool): If True and the model cannot be loaded, a new model will be trained automatically.
-        include_long_signals (bool): If True, include LONG signals in the results. Default True.
-        include_short_signals (bool): If True, include SHORT signals in the results. Default False.
+        preloaded_data: Pre-loaded symbol data in format {symbol: {timeframe: dataframe}}
+        timeframes_to_scan: Specific timeframes to scan, in order of priority. 
+                          Defaults to ['1h', '4h', '1d'].
+        trained_model_data: Pre-trained Transformer model data tuple 
+                          (model, scaler, feature_cols, target_idx). If None,
+                          it will be loaded from `model_path` or a new model 
+                          will be trained if `auto_train_if_missing` is True.
+        model_path: Path to the saved model file. If None and 
+                   `trained_model_data` is None, a default location will be used.
+        auto_train_if_missing: If True and the model cannot be loaded, a new model will be trained automatically.
+        include_long_signals: If True, include LONG signals in the results. Default True.
+        include_short_signals: If True, include SHORT signals in the results. Default False.
         
     Returns:
-        pd.DataFrame: DataFrame containing symbols with signals, with columns ['Pair', 'SignalTimeframe', 'SignalType'].
+        DataFrame containing symbols with signals, with columns ['Symbol', 'SignalTimeframe', 'SignalType'].
     """
+    gpu_manager = get_gpu_resource_manager()
+    
+    with gpu_manager.gpu_scope() as device:
+        device_str = str(device) if device else 'cpu'
+        logger.gpu(f"Using device for Transformer processing: {device_str}")
+        
+        if device:
+            memory_info = gpu_manager.get_memory_info()
+            logger.memory(f"GPU Memory - Total: {memory_info['total']//1024**2}MB, "
+                         f"Allocated: {memory_info['allocated']//1024**2}MB, "
+                         f"Cached: {memory_info['cached']//1024**2}MB")
     logger.analysis("===============================================")
     logger.analysis("STARTING TRANSFORMER SIGNAL ANALYSIS (CRYPTO)")
     logger.analysis("===============================================")
@@ -160,13 +165,11 @@ def process_signals_transformer(
     logger.data(f"Analyzing {len(symbols_to_analyze)} crypto symbols from preloaded data.")
 
     # Prepare data for model training if needed
-    combined_df = combine_all_dataframes(preloaded_data)
+    combined_df = combine_all_dataframes(preloaded_data)        
     
-    # --- Model Loading/Training with improved error handling ---
+    # --- Model Loading/Training with GPU resource management ---
     model_data = trained_model_data
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    logger.gpu(f"Using device: {device}")
-    
+        
     if model_data is None:
         if model_path is not None:
             logger.model(f"Attempting to load transformer model from specified path: {model_path}")
@@ -190,10 +193,9 @@ def process_signals_transformer(
             logger.model("No transformer model found. auto_train_if_missing=True, training a new model...")
             if not combined_df.empty: 
                 try:
-                    # Ensure there's data to train on
+                    # Training with GPU resource management
                     trained_model, trained_model_path = train_and_save_transformer_model(combined_df)
                     if trained_model is not None and trained_model_path:
-                        # Load the newly trained model to get all components
                         model_data = load_transformer_model(trained_model_path)
                         if model_data and model_data[0] is not None:
                             logger.success(f"Successfully trained and saved new transformer model to {trained_model_path}")
@@ -213,9 +215,22 @@ def process_signals_transformer(
         logger.error("No Transformer model available. Cannot generate any signals.")
         return pd.DataFrame([], columns=DATAFRAME_COLUMNS)
     
-    # Unpack model data
+    # Unpack model data and move to appropriate device
     model, scaler, feature_cols, target_idx = model_data
-    model.to(device)  # Move model to appropriate device
+    
+    # Move model to GPU if available, with error handling
+    try:
+        if device:
+            model.to(device)
+            logger.gpu(f"Model successfully moved to {device}")
+        else:
+            model.to('cpu')
+            logger.gpu("Model running on CPU")
+    except Exception as e:
+        logger.error(f"Error moving model to device: {e}")
+        model.to('cpu')
+        device_str = 'cpu'
+        logger.gpu("Fallback to CPU due to GPU error")
     logger.model("Using Transformer model to generate signals.")
     
     # Add debugging for threshold values
@@ -234,7 +249,7 @@ def process_signals_transformer(
             df_with_features = add_technical_indicators(combined_df)
             if not df_with_features.empty and len(df_with_features) > 100:
                 suggested_buy, suggested_sell = analyze_model_bias_and_adjust_thresholds(
-                    df_with_features, model, scaler, feature_cols, target_idx, device
+                    df_with_features, model, scaler, feature_cols, target_idx, device_str
                 )
                 
                 # Validate suggested thresholds
@@ -291,12 +306,10 @@ def process_signals_transformer(
                 # Add symbol information to DataFrame for debugging
                 df_with_symbol = df_current_tf.copy()
                 if hasattr(df_with_symbol, 'symbol'):
-                    df_with_symbol.symbol = symbol  # Add symbol for debugging
-                
-                # Call signal generation with error handling
-                signal = get_latest_transformer_signal(
-                    df_with_symbol, model, scaler, feature_cols, target_idx, device, suggested_thresholds
-                )
+                    df_with_symbol.symbol = symbol                    
+                    signal = get_latest_transformer_signal(
+                        df_with_symbol, model, scaler, feature_cols, target_idx, device_str, suggested_thresholds
+                    )
                 
                 # Validate signal
                 if signal not in [SIGNAL_LONG, SIGNAL_SHORT, SIGNAL_NEUTRAL]:
@@ -314,7 +327,7 @@ def process_signals_transformer(
                 # Process LONG signals
                 if signal == SIGNAL_LONG and include_long_signals:
                     signals_list.append({
-                        'Pair': symbol,
+                        'Symbol': symbol,
                         'SignalTimeframe': tf_scan,
                         'SignalType': 'LONG'
                     })
@@ -324,7 +337,7 @@ def process_signals_transformer(
                 # Process SHORT signals
                 elif signal == SIGNAL_SHORT and include_short_signals:
                     signals_list.append({
-                        'Pair': symbol,
+                        'Symbol': symbol,
                         'SignalTimeframe': tf_scan,
                         'SignalType': 'SHORT'
                     })
@@ -422,16 +435,13 @@ def process_signals_transformer(
     # Add success rate information
     if signal_stats['processed'] > 0:
         success_rate = ((signal_stats['processed'] - signal_stats['errors']) / signal_stats['processed']) * 100
-        logger.performance(f"Processing success rate: {success_rate:.1f}%")
-    
-    logger.analysis("="*60)
+        logger.performance(f"Processing success rate: {success_rate:.1f}%")        
+        # Final GPU memory report
+        if device:
+            final_memory_info = gpu_manager.get_memory_info()
+            logger.memory(f"Final GPU Memory - Allocated: {final_memory_info['allocated']//1024**2}MB, "
+                         f"Cached: {final_memory_info['cached']//1024**2}MB")
+        
+        logger.analysis("="*60)
 
-    # Clean up GPU memory at the end
-    try:
-        if device == 'cuda' and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            logger.gpu("GPU cache cleared after signal processing")
-    except Exception as e:
-        logger.debug(f"Error clearing GPU cache: {e}")
-
-    return pd.DataFrame(signals_list) if signals_list else pd.DataFrame([], columns=DATAFRAME_COLUMNS)
+        return pd.DataFrame(signals_list) if signals_list else pd.DataFrame([], columns=DATAFRAME_COLUMNS)

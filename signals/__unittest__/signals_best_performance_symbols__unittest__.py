@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from signals.signals_best_performance_symbols import (
-    signal_best_performance_pairs,
+    signal_best_performance_symbols,
     get_top_performers_by_timeframe,
     get_worst_performers_by_timeframe,
     get_short_signal_candidates,
@@ -278,7 +278,7 @@ class TestMainFunction(unittest.TestCase):
     @patch('signals.signals_best_performance_symbols.logger')
     def test_signal_best_performance_pairs_success(self, mock_logger):
         """Test successful execution of main function"""
-        result = signal_best_performance_pairs(
+        result = signal_best_performance_symbols(
             processor=self.mock_processor,
             symbols=['BTCUSDT', 'ETHUSDT', 'ADAUSDT'],
             timeframes=['1h', '4h'],
@@ -308,7 +308,7 @@ class TestMainFunction(unittest.TestCase):
     
     def test_signal_best_performance_pairs_no_preloaded_data(self):
         """Test function with no preloaded data"""
-        result = signal_best_performance_pairs(
+        result = signal_best_performance_symbols(
             processor=self.mock_processor,
             preloaded_data=None
         )
@@ -319,7 +319,7 @@ class TestMainFunction(unittest.TestCase):
         """Test function with empty symbols list"""
         self.mock_processor.get_symbols_list_by_quote_usdt.return_value = []
         
-        result = signal_best_performance_pairs(
+        result = signal_best_performance_symbols(
             processor=self.mock_processor,
             preloaded_data=self.sample_preloaded_data
         )

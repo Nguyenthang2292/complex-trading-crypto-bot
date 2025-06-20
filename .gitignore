@@ -19,10 +19,10 @@ __pycache__/
 **/.vscode/
 .vscode/
 
-CHECK LIST.xlsx
-/CHECK LIST.xlsx
-**/CHECK LIST.xlsx
-**/prompt.txt
+# CHECK LIST.xlsx
+# /CHECK LIST.xlsx
+# **/CHECK LIST.xlsx
+# **/prompt.txt
 **/.prettierrc
 
 environment.yml

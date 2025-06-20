@@ -1,11 +1,10 @@
 import unittest
-from pathlib import Path
 import torch
 import sys
 import numpy as np
 
-current_dir = Path(__file__).resolve().parent
-sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from signals._components.LSTM__class__PositionalEncoding import PositionalEncoding
 

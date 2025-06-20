@@ -17,7 +17,7 @@ from livetrade._components._load_all_symbols_data import load_all_symbols_data
 from livetrade._components._tick_processor import tick_processor
 from signals._process_signals._process_signals_hmm import process_signals_hmm
 from signals._process_signals._process_signals_random_forest import process_signals_random_forest
-from signals.signals_best_performance_symbols import signal_best_performance_pairs
+from signals.signals_best_performance_symbols import signal_best_performance_symbols
 from livetrade._components._combine_all_dataframes import combine_all_dataframes 
 from signals.signals_random_forest import train_and_save_global_rf_model
 
@@ -220,7 +220,7 @@ def crypto_signal_workflow(processor, timeframes_performance: Optional[List[str]
         if terminate:
             raise KeyboardInterrupt("Termination requested during performance analysis")
         
-        performance_result_long = signal_best_performance_pairs(
+        performance_result_long = signal_best_performance_symbols(
             processor=processor,
             symbols=list(preloaded_data.keys()),
             timeframes=timeframes_performance,
@@ -236,7 +236,7 @@ def crypto_signal_workflow(processor, timeframes_performance: Optional[List[str]
             logger.error("Failed to get performance analysis results for LONG signals")
             return []
         
-        performance_result_short = signal_best_performance_pairs(
+        performance_result_short = signal_best_performance_symbols(
             processor=processor,
             symbols=list(preloaded_data.keys()),
             timeframes=timeframes_performance,

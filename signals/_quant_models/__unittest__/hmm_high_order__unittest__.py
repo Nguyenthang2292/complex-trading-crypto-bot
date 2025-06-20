@@ -9,7 +9,7 @@ import time
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
 
-from data_class.__class__OptimizingParametersHMM import OptimizingParametersHMM
+from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
 from signals._quant_models.hmm_high_order import (
     hmm_high_order,
     convert_swing_to_state,
@@ -50,7 +50,7 @@ class TestHMMHighOrder(unittest.TestCase):
         self.df_small = self.df_valid.head(5)
         
         # Optimizing parameters
-        self.optimizing_params = OptimizingParametersHMM()
+        self.optimizing_params = OptimizingParameters()
 
     def test_hmm_high_order_valid_input(self):
         """Test hmm_high_order with valid input"""
@@ -116,7 +116,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_hmm_high_order_custom_optimizing_params(self):
         """Test hmm_high_order with custom optimizing parameters"""
-        custom_params = OptimizingParametersHMM()
+        custom_params = OptimizingParameters()
         custom_params.orders_argrelextrema = 3
         custom_params.strict_mode = True
         

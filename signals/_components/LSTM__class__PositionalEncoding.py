@@ -1,19 +1,13 @@
 import logging
 import numpy as np
-import os
 import sys
 import torch
 import torch.nn as nn
-from typing import Optional
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-components_dir = os.path.dirname(current_dir)
-signals_dir = os.path.dirname(components_dir)
-if signals_dir not in sys.path:
-    sys.path.insert(0, signals_dir)
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from utilities._logger import setup_logging
-# Initialize logger for LSTM Attention module
 logger = setup_logging(module_name="LSTM__class__PositionalEncoding", log_level=logging.DEBUG)
 
 class PositionalEncoding(nn.Module):
