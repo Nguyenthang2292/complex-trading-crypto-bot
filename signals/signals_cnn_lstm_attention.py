@@ -290,7 +290,7 @@ def safe_load_model(model_path: str) -> Optional[Dict]:
         logger.warning(f"Loading with safe_globals approach failed: {e}")
         
     try:
-        # Attempt 4: Fallback to older PyTorch loading method (no weights_only parameter)
+        # Attempt 3: Fallback to older PyTorch loading method (no weights_only parameter)
         checkpoint = torch.load(model_path, map_location='cpu')
         logger.debug("Model loaded with legacy method")
         return checkpoint
