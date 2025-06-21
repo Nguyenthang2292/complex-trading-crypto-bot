@@ -44,13 +44,12 @@ from signals.signals_cnn_lstm_attention import (
     get_latest_cnn_lstm_attention_signal
 )
 from utilities._gpu_resource_manager import get_gpu_resource_manager
+
 from utilities._logger import setup_logging
+logger = setup_logging(module_name="signals_cnn_lstm_attention__main__", log_level=logging.DEBUG)
 
 # Constants
 REQUIRED_COLUMNS = ['open', 'high', 'low', 'close', 'volume']
-
-# Initialize logger
-logger = setup_logging(module_name="signals_cnn_lstm_attention__main__", log_level=logging.DEBUG)
 
 class ModelConfiguration:
     """
