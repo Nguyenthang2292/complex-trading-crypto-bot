@@ -39,7 +39,7 @@ from signals.signals_transformer import (
 )
 
 # Import the calculate_features function
-from signals._components._generate_indicator_features import _generate_indicator_features
+from signals._components._generate_indicator_features import generate_indicator_features
 
 # Check GPU availability at startup
 gpu_available = check_gpu_availability()
@@ -86,7 +86,7 @@ def main():
     logger.data(f"Loaded {len(df)} rows of data for {symbol} {timeframe}")
     
     # Data preprocessing
-    df_ind = _generate_indicator_features(df)
+    df_ind = generate_indicator_features(df)
     data_scaled, scaler, feature_cols = select_and_scale_features(df_ind)
     target_idx = feature_cols.index(COL_CLOSE)
     logger.config(f"Target index (close price) at position {target_idx} in features")

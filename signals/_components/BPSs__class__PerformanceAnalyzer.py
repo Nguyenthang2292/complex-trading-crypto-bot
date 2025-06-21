@@ -5,8 +5,8 @@ import sys
 import pandas as pd
 from typing import List, Dict
 
-# Add the parent directory to sys.path to allow importing modules from sibling directories
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from livetrade.config import (DEFAULT_WINDOW_SIZE, RSI_PERIOD)
 from utilities._logger import setup_logging

@@ -7,16 +7,18 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, Dataset
+from torch.amp import autocast, GradScaler
 from typing import List, Optional, Tuple
 
 # Add the parent directory to sys.path to allow importing from config
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utilities._logger import setup_logging
+from utilities._gpu_resource_manager import get_gpu_resource_manager
 logger = setup_logging(module_name="signals_transformer", log_level=logging.DEBUG)
 
 from signals._components._gpu_check_availability import check_gpu_availability
-from signals._components._generate_indicator_features import _generate_indicator_features
+from signals._components._generate_indicator_features import generate_indicator_features
 
 from livetrade.config import (
     BUY_THRESHOLD,
@@ -32,7 +34,8 @@ from livetrade.config import (
 # Check GPU availability at module level
 gpu_available = check_gpu_availability()
 
-def select_and_scale_features(df: pd.DataFrame, feature_cols: Optional[List[str]] = None) -> Tuple[np.ndarray, MinMaxScaler, List[str]]:
+def select_and_scale_features(df: pd.DataFrame, 
+                              feature_cols: Optional[List[str]] = None) -> Tuple[np.ndarray, MinMaxScaler, List[str]]:
     """
     Selects features and applies MinMax scaling to prepare data for model.
     
@@ -151,11 +154,19 @@ class TimeSeriesTransformer(nn.Module):
         out = self.fc_out(last_step)
         return out
 
-def train_transformer_model(model: TimeSeriesTransformer, train_loader: DataLoader, 
-                            val_loader: Optional[DataLoader] = None, lr: float = 1e-3, 
-                            epochs: int = DEFAULT_EPOCHS, device: str = 'cpu') -> TimeSeriesTransformer:
+def train_transformer_model(model: TimeSeriesTransformer, 
+                            train_loader: DataLoader, 
+                            val_loader: Optional[DataLoader] = None, 
+                            lr: float = 1e-3, 
+                            epochs: int = DEFAULT_EPOCHS, 
+                            device: str = 'cpu',
+                            use_early_stopping: bool = True, 
+                            patience: int = 10,
+                            use_mixed_precision: bool = True, 
+                            gradient_accumulation_steps: int = 1) -> TimeSeriesTransformer:
     """
-    Trains the transformer model with monitoring and logging.
+    Trains the transformer model with advanced optimizations including early stopping, 
+    mixed precision training, and GPU optimizations.
     
     Args:
         model (TimeSeriesTransformer): Model to train
@@ -164,83 +175,211 @@ def train_transformer_model(model: TimeSeriesTransformer, train_loader: DataLoad
         lr (float): Learning rate
         epochs (int): Number of training epochs
         device (str): Device to train on ('cpu' or 'cuda')
+        use_early_stopping (bool): Enable early stopping
+        patience (int): Early stopping patience
+        use_mixed_precision (bool): Use automatic mixed precision (AMP)
+        gradient_accumulation_steps (int): Steps to accumulate gradients
         
     Returns:
         TimeSeriesTransformer: Trained model
     """
-    if device == 'cuda':
-        logger.gpu(f"Training on GPU: {torch.cuda.get_device_name()}")
-        logger.memory(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
-    else:
-        logger.info("Training on CPU")
+    gpu_manager = get_gpu_resource_manager()
     
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-
-    model.to(device)
-    
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.model(f"Total parameters: {total_params:,}")
-    logger.model(f"Trainable parameters: {trainable_params:,}")
-
-    for epoch in range(epochs):
-        model.train()
-        train_losses = []
+    # Use GPU resource manager for better resource management
+    with gpu_manager.gpu_scope(device_id=0 if device == 'cuda' else None) as gpu_device:
+        # Determine actual device to use
+        actual_device = gpu_device if gpu_device is not None else torch.device('cpu')
+        use_gpu = actual_device.type == 'cuda'
         
-        if device == 'cuda':
-            torch.cuda.empty_cache()
+        # GPU optimization setup
+        use_amp = use_mixed_precision and use_gpu
+        if use_amp:
+            # Check if GPU supports mixed precision (Compute Capability >= 7.0)
+            if torch.cuda.get_device_capability(0)[0] >= 7:
+                logger.gpu("Using Automatic Mixed Precision (AMP) for faster training")
+            else:
+                use_amp = False
+                logger.warning("GPU doesn't support mixed precision, falling back to FP32")
+        
+        if use_gpu:
+            # Get GPU memory info using resource manager
+            memory_info = gpu_manager.get_memory_info()
+            logger.gpu(f"Training on GPU: {torch.cuda.get_device_name()}")
+            logger.memory(f"GPU Memory - Total: {memory_info['total'] / 1024**3:.1f} GB, "
+                         f"Allocated: {memory_info['allocated'] / 1024**3:.2f} GB, "
+                         f"Cached: {memory_info['cached'] / 1024**3:.2f} GB")
             
-        for batch_idx, (x_batch, y_batch) in enumerate(train_loader):
-            x_batch = x_batch.to(device)
-            y_batch = y_batch.to(device)
-
-            optimizer.zero_grad()
-            output = model(x_batch)
-            loss = criterion(output, y_batch)
-            loss.backward()
-            optimizer.step()
-            train_losses.append(loss.item())
-            
-            if device == 'cuda' and batch_idx % 10 == 0:
-                memory_allocated = torch.cuda.memory_allocated() / 1024**3
-                memory_reserved = torch.cuda.memory_reserved() / 1024**3
-                if batch_idx % 50 == 0:
-                    logger.memory(f"Epoch {epoch+1}, Batch {batch_idx}: GPU Memory - Allocated: {memory_allocated:.2f}GB, Reserved: {memory_reserved:.2f}GB")
-
-        mean_train_loss = np.mean(train_losses)
-
-        if val_loader is not None:
-            model.eval()
-            val_losses = []
-            with torch.no_grad():
-                for x_val, y_val in val_loader:
-                    x_val = x_val.to(device)
-                    y_val = y_val.to(device)
-                    output_val = model(x_val)
-                    loss_val = criterion(output_val, y_val)
-                    val_losses.append(loss_val.item())
-            mean_val_loss = np.mean(val_losses)
-            
-            memory_info = ""
-            if device == 'cuda':
-                memory_allocated = torch.cuda.memory_allocated() / 1024**3
-                memory_info = f", GPU Mem: {memory_allocated:.2f}GB"
-                
-            logger.model(f"Epoch [{epoch+1}/{epochs}], Train Loss: {mean_train_loss:.6f}, Val Loss: {mean_val_loss:.6f}{memory_info}")
+            # GPU memory optimization
+            torch.backends.cudnn.benchmark = True  # Optimize cuDNN for consistent input sizes
         else:
-            memory_info = ""
-            if device == 'cuda':
-                memory_allocated = torch.cuda.memory_allocated() / 1024**3
-                memory_info = f", GPU Mem: {memory_allocated:.2f}GB"
+            logger.config("Training on CPU")
+        
+        # Loss function and optimizer setup
+        criterion = nn.MSELoss()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01, eps=1e-8)
+        
+        # Learning rate scheduler
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=patience//2, verbose=True, min_lr=1e-7
+        )
+        
+        # Mixed precision scaler
+        scaler = GradScaler() if use_amp else None
+        
+        model.to(actual_device)
+        
+        # Model info
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        logger.model(f"Total parameters: {total_params:,}")
+        logger.model(f"Trainable parameters: {trainable_params:,}")
+        logger.config(f"Device: {actual_device}, Mixed Precision: {use_amp}, Gradient Accumulation: {gradient_accumulation_steps}")
+        
+        # Early stopping variables
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_model_state = None
+        
+        # Training history
+        training_history = {
+            'train_loss': [],
+            'val_loss': [],
+            'learning_rates': []
+        }
+        
+        logger.model(f"Starting training for {epochs} epochs...")
+        
+        for epoch in range(epochs):
+            # Training phase
+            model.train()
+            train_losses = []
+            optimizer.zero_grad()
                 
-            logger.model(f"Epoch [{epoch+1}/{epochs}], Train Loss: {mean_train_loss:.6f}{memory_info}")
+            for batch_idx, (x_batch, y_batch) in enumerate(train_loader):
+                x_batch = x_batch.to(actual_device, non_blocking=True)
+                y_batch = y_batch.to(actual_device, non_blocking=True)
 
-    if device == 'cuda':
-        torch.cuda.empty_cache()
-        logger.memory("GPU cache cleared after training")
+            # Forward pass with optional mixed precision
+            if use_amp and scaler is not None:
+                with autocast(device_type='cuda'):
+                    output = model(x_batch)
+                    loss = criterion(output, y_batch)
+                    loss = loss / gradient_accumulation_steps  # Scale loss for gradient accumulation
+                
+                # Backward pass with gradient scaling
+                scaler.scale(loss).backward()
+                
+                # Gradient accumulation
+                if (batch_idx + 1) % gradient_accumulation_steps == 0:
+                    # Gradient clipping before optimizer step
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+            else:
+                output = model(x_batch)
+                loss = criterion(output, y_batch)
+                loss = loss / gradient_accumulation_steps
+                loss.backward()
+                
+                # Gradient accumulation
+                if (batch_idx + 1) % gradient_accumulation_steps == 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
+                    optimizer.zero_grad()
+                
+                train_losses.append(loss.item() * gradient_accumulation_steps)  # Restore original loss scale
+                
+                # GPU memory monitoring using resource manager
+                if use_gpu and batch_idx % 20 == 0:
+                    memory_info = gpu_manager.get_memory_info()
+                    if batch_idx % 100 == 0:
+                        logger.memory(f"Epoch {epoch+1}, Batch {batch_idx}: GPU Memory - "
+                                    f"Allocated: {memory_info['allocated'] / 1024**3:.2f}GB, "
+                                    f"Cached: {memory_info['cached'] / 1024**3:.2f}GB")
 
-    return model
+            mean_train_loss = np.mean(train_losses)
+            training_history['train_loss'].append(mean_train_loss)
+            training_history['learning_rates'].append(optimizer.param_groups[0]['lr'])
+
+            # Validation phase
+            if val_loader is not None:
+                model.eval()
+                val_losses = []
+                with torch.no_grad():
+                    for x_val, y_val in val_loader:
+                        x_val = x_val.to(actual_device, non_blocking=True)
+                        y_val = y_val.to(actual_device, non_blocking=True)
+                        
+                        if use_amp:
+                            with autocast(device_type='cuda'):
+                                output_val = model(x_val)
+                                loss_val = criterion(output_val, y_val)
+                        else:
+                            output_val = model(x_val)
+                            loss_val = criterion(output_val, y_val)
+                        
+                        val_losses.append(loss_val.item())
+                
+                mean_val_loss = np.mean(val_losses)
+                training_history['val_loss'].append(mean_val_loss)
+                
+                # Learning rate scheduling
+                scheduler.step(mean_val_loss)
+                
+                # Early stopping logic
+                if use_early_stopping:
+                    if mean_val_loss < best_val_loss:
+                        best_val_loss = mean_val_loss
+                        patience_counter = 0
+                        best_model_state = model.state_dict().copy()
+                        logger.performance(f"✅ New best validation loss: {best_val_loss:.6f}")
+                    else:
+                        patience_counter += 1
+                        
+                    if patience_counter >= patience:
+                        logger.model(f"🛑 Early stopping triggered after {epoch+1} epochs (patience: {patience})")
+                        if best_model_state is not None:
+                            model.load_state_dict(best_model_state)
+                            logger.model("🔄 Restored best model state")
+                        break
+                
+                # Progress logging with memory info
+                memory_info_str = ""
+                if use_gpu:
+                    memory_info = gpu_manager.get_memory_info()
+                    memory_info_str = f", GPU Mem: {memory_info['allocated'] / 1024**3:.2f}GB"
+                
+                current_lr = optimizer.param_groups[0]['lr']
+                early_stop_info = f", Patience: {patience_counter}/{patience}" if use_early_stopping else ""
+                
+                logger.performance(f"Epoch [{epoch+1}/{epochs}] - Train Loss: {mean_train_loss:.6f}, "
+                                 f"Val Loss: {mean_val_loss:.6f}, LR: {current_lr:.2e}{early_stop_info}{memory_info_str}")
+            else:
+                # No validation data
+                memory_info_str = ""
+                if use_gpu:
+                    memory_info = gpu_manager.get_memory_info()
+                    memory_info_str = f", GPU Mem: {memory_info['allocated'] / 1024**3:.2f}GB"
+                
+                current_lr = optimizer.param_groups[0]['lr']
+                logger.performance(f"Epoch [{epoch+1}/{epochs}] - Train Loss: {mean_train_loss:.6f}, "
+                                 f"LR: {current_lr:.2e}{memory_info_str}")
+        
+        # Training summary
+        if training_history['val_loss']:
+            final_val_loss = training_history['val_loss'][-1]
+            best_val_loss_epoch = np.argmin(training_history['val_loss']) + 1
+            logger.success(f"📊 Training completed - Final Val Loss: {final_val_loss:.6f}, "
+                          f"Best Val Loss: {min(training_history['val_loss']):.6f} (Epoch {best_val_loss_epoch})")
+        else:
+            final_train_loss = training_history['train_loss'][-1]
+            logger.success(f"📊 Training completed - Final Train Loss: {final_train_loss:.6f}")
+
+        # GPU resource manager will automatically cleanup when exiting context
+        return model
 
 def evaluate_model(model: TimeSeriesTransformer, test_loader: DataLoader, scaler: MinMaxScaler, 
                    feature_cols: List[str], target_col_idx: int, device: str = 'cpu') -> Tuple[float, float]:
@@ -313,7 +452,7 @@ def get_latest_transformer_signal(df_market_data: pd.DataFrame, model: TimeSerie
             logger.warning("Input DataFrame for signal generation is empty")
             return SIGNAL_NEUTRAL
         
-        df_with_features = _generate_indicator_features(df_market_data.copy())
+        df_with_features = generate_indicator_features(df_market_data.copy())
         if df_with_features.empty:
             logger.warning("DataFrame became empty after feature calculation")
             return SIGNAL_NEUTRAL
@@ -523,7 +662,7 @@ def train_and_save_transformer_model(df_input: pd.DataFrame, model_filename: Opt
             logger.error(f"Insufficient data for training: {len(df_input)} < {MIN_DATA_POINTS}")
             return None, ""
         
-        df_with_features = _generate_indicator_features(df_input)
+        df_with_features = generate_indicator_features(df_input)
         if df_with_features.empty:
             logger.error("No data after feature calculation")
             return None, ""
@@ -546,8 +685,15 @@ def train_and_save_transformer_model(df_input: pd.DataFrame, model_filename: Opt
         val_ds = torch.utils.data.Subset(dataset, range(n_train, n_train + n_val))
         
         batch_size = 32
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+        if gpu_available:
+            # Increase batch size for GPU training
+            batch_size = 64
+            logger.gpu(f"Using GPU-optimized batch size: {batch_size}")
+        
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, 
+                                 pin_memory=gpu_available, num_workers=0 if gpu_available else 2)
+        val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                               pin_memory=gpu_available, num_workers=0 if gpu_available else 2)
         
         device = 'cuda' if gpu_available else 'cpu'
         logger.config(f"Training on device: {device}")
@@ -557,7 +703,19 @@ def train_and_save_transformer_model(df_input: pd.DataFrame, model_filename: Opt
         model_config['feature_size'] = len(feature_cols)
         model = TimeSeriesTransformer(**model_config)
         
-        trained_model = train_transformer_model(model, train_loader, val_loader, device=device, epochs=DEFAULT_EPOCHS)
+        # Training with enhanced parameters
+        trained_model = train_transformer_model(
+            model=model, 
+            train_loader=train_loader, 
+            val_loader=val_loader, 
+            device=device, 
+            epochs=DEFAULT_EPOCHS,
+            use_early_stopping=True,
+            patience=15,
+            use_mixed_precision=gpu_available,
+            gradient_accumulation_steps=2 if gpu_available else 1,
+            lr=3e-4 if gpu_available else 1e-3
+        )
         
         logger.analysis("="*60)
         logger.analysis("TRAINING DATA ANALYSIS FOR BIAS DETECTION")

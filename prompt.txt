@@ -3,8 +3,14 @@ PROMPT
 refactor lại, giữ nguyên logic, không thêm hàm mới hoặc tách nhỏ hàm đang có, tận dụng tối ưu các biến, loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết,
 bổ sung datatype cho input và return đầy đủ
 
-refactor lại các logger với method tương ứng từ _logger.py
+refactor lại các logger và print với method tương ứng từ _logger.py
 
 kiểm tra lại file signals_transformer.py xem còn testcase nào cần bổ sung thì bổ sung vào file signals_transformer__unittest__.py cho tôi
 
-trình bày kết quả các test dưới dạng báo cáo ở cmd cho tôi, update truẹc tiếp trên file không tách thành file mơi
+trình bày kết quả các test dưới dạng báo cáo ở cmd cho tôi, update truẹc tiếp trên file không tách thành file mới
+
+signals_cnn_lstm_attention có chế độ early stopping chưa, nếu chưa có thì bổ sung cho tôi và tăng tối đa sử dụng gpu để training nhanh hơn, 
+sử dụng _gpu_resource_manager.py nếu có thể
+
+
+kiểm tra xem file có lỗi gì không (bao gồm cả lỗi logic)

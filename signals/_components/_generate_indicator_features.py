@@ -3,9 +3,9 @@ import pandas as pd
 import pandas_ta as ta
 import numpy as np
 import sys
-from pathlib import Path
 from typing import List, Optional, Tuple
 
+from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from utilities._logger import setup_logging
@@ -74,7 +74,7 @@ def _calculate_sma_vectorized(close_values: np.ndarray, period: int) -> np.ndarr
     """Calculate Simple Moving Average using vectorized operations."""
     return pd.Series(close_values).rolling(window=period, min_periods=1).mean().values
 
-def _generate_indicator_features(df_input: pd.DataFrame) -> pd.DataFrame:
+def generate_indicator_features(df_input: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate technical indicators using vectorized NumPy operations for optimal performance.
     
@@ -168,13 +168,13 @@ def _generate_indicator_features(df_input: pd.DataFrame) -> pd.DataFrame:
             df['ma_20'] = _calculate_sma_vectorized(close_values, SMA_PERIOD)
 
         # Vectorized slope calculation
-        df['ma_20_slope'] = np.gradient(df['ma_20'].fillna(method='ffill').values)
+        df['ma_20_slope'] = np.gradient(df['ma_20'].ffill().values)
 
         # Optimized NaN handling
         numeric_columns: List[str] = ['rsi', 'macd', 'macd_signal', COL_BB_UPPER, COL_BB_LOWER, 'ma_20', 'ma_20_slope']
         for col in numeric_columns:
             if col in df.columns:
-                df[col] = df[col].fillna(method='bfill').fillna(method='ffill')
+                df[col] = df[col].bfill().ffill()
         
         result_df: pd.DataFrame = df.dropna()
         if result_df.empty:

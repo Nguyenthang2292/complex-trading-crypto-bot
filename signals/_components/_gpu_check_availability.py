@@ -3,8 +3,6 @@ import os
 import sys
 import torch
 from pathlib import Path
-from typing import bool
-
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from utilities._logger import setup_logging

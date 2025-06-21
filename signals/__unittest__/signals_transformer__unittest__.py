@@ -25,7 +25,7 @@ from signals.signals_transformer import (
 )
 
 # Import the calculate features function
-from signals._components._generate_indicator_features import _generate_indicator_features
+from signals._components._generate_indicator_features import generate_indicator_features
 
 # Import constants for testing
 from livetrade.config import (
@@ -53,7 +53,7 @@ class TestTechnicalIndicators(unittest.TestCase):
     
     def test_calculate_features_success(self):
         """Test successful technical indicators calculation"""
-        result = _generate_indicator_features(self.df.copy())
+        result = generate_indicator_features(self.df.copy())
         
         # Check that new columns are added
         expected_columns = ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20', 'ma_20_slope']
@@ -67,19 +67,19 @@ class TestTechnicalIndicators(unittest.TestCase):
     def test_calculate_features_empty_dataframe(self):
         """Test with empty DataFrame"""
         empty_df = pd.DataFrame()
-        result = _generate_indicator_features(empty_df)
+        result = generate_indicator_features(empty_df)
         self.assertTrue(result.empty, "Should return empty DataFrame for empty input")
     
     def test_calculate_features_missing_close(self):
         """Test with missing close column"""
         df_no_close = self.df.drop('close', axis=1)
-        result = _generate_indicator_features(df_no_close)
+        result = generate_indicator_features(df_no_close)
         self.assertTrue(result.empty, "Should return empty DataFrame without close column")
     
     def test_calculate_features_insufficient_data(self):
         """Test with insufficient data"""
         small_df = self.df.head(5)  # Only 5 rows
-        result = _generate_indicator_features(small_df)
+        result = generate_indicator_features(small_df)
         # Should still return DataFrame with indicators, but may have fewer rows after dropna
         self.assertGreaterEqual(len(result), 0, "Should return DataFrame with non-negative length")
 
@@ -405,7 +405,7 @@ class TestTechnicalIndicatorsEdgeCases(unittest.TestCase):
             'volume': [1000, 1100, 1200, 1300, 1400]
         })
         
-        result = _generate_indicator_features(df)
+        result = generate_indicator_features(df)
         
         # Should handle NaN values without crashing
         self.assertGreaterEqual(len(result), 0, "Should return DataFrame with non-negative length")
@@ -420,7 +420,7 @@ class TestTechnicalIndicatorsEdgeCases(unittest.TestCase):
             'volume': [1000] * 50
         })
         
-        result = _generate_indicator_features(df)
+        result = generate_indicator_features(df)
         
         # Should handle constant prices without crashing
         self.assertGreaterEqual(len(result), 0, "Should return DataFrame with non-negative length")
@@ -440,7 +440,7 @@ class TestTechnicalIndicatorsEdgeCases(unittest.TestCase):
             'volume': [1000, 1100, 1200, 1300, 1400]
         })
         
-        result = _generate_indicator_features(df)
+        result = generate_indicator_features(df)
         
         # Should handle extreme values without crashing
         self.assertGreaterEqual(len(result), 0, "Should return DataFrame with non-negative length")
