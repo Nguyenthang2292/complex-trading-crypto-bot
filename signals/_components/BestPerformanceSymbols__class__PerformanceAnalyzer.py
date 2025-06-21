@@ -8,11 +8,11 @@ from typing import List, Dict
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from livetrade.config import (DEFAULT_WINDOW_SIZE, RSI_PERIOD)
+from components.config import (DEFAULT_WINDOW_SIZE, RSI_PERIOD)
 from utilities._logger import setup_logging
 
 # Setup logging with new format
-logger = setup_logging(module_name="BPSs__class__PerformanceAnalyzer", log_level=logging.DEBUG)
+logger = setup_logging(module_name="BestPerformanceSymbols__class__PerformanceAnalyzer", log_level=logging.DEBUG)
 
 class PerformanceAnalyzer:
     """Handles crypto performance analysis for both LONG and SHORT signals."""

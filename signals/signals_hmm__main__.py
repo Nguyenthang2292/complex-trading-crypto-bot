@@ -9,8 +9,8 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
-from livetrade._components._tick_processor import tick_processor
-from livetrade.config import (
+from components.tick_processor import tick_processor
+from components.config import (
     SIGNAL_LONG_HMM as LONG,
     SIGNAL_HOLD_HMM as HOLD,
     SIGNAL_SHORT_HMM as SHORT,

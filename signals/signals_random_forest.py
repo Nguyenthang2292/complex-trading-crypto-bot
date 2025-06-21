@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from utilities._logger import setup_logging
 logger = setup_logging(module_name="signals_random_forest", log_level=logging.INFO)
 
-from livetrade.config import (
+from components.config import (
     BB_STD_MULTIPLIER, BUY_THRESHOLD, 
     COL_BB_LOWER, COL_BB_UPPER, COL_CLOSE, COL_HIGH, COL_LOW, COL_OPEN,
     CONFIDENCE_THRESHOLD, CONFIDENCE_THRESHOLDS, DEFAULT_WINDOW_SIZE,

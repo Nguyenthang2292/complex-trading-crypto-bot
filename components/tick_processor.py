@@ -7,7 +7,7 @@ import json
 from binance.spot import Spot as Client
 # from binance.cm_futures import CMFutures
 
-from livetrade.config_api import API_KEY, API_SECRET
+from components.config_api import API_KEY, API_SECRET
 
 class tick_processor():
     def __init__(self, trade_open_callback, trade_close_callback,):

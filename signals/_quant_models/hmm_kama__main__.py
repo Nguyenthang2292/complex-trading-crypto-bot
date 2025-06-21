@@ -20,7 +20,7 @@ if __name__ == "__main__":
     import time
     
     main_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-    livetrade_dir = os.path.join(main_dir, 'livetrade')
+    livetrade_dir = os.path.join(main_dir, 'components')
     components_dir = os.path.join(livetrade_dir, '_components')
     
     for path in [main_dir, livetrade_dir, components_dir]:
@@ -28,7 +28,7 @@ if __name__ == "__main__":
             sys.path.insert(0, path)
     
     try:
-        from livetrade._components._tick_processor import tick_processor
+        from components._components._tick_processor import tick_processor
     except ImportError:
         logger.error("Failed to import tick_processor. Check the path structure.")
         sys.exit(1)
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     config_path = os.path.join(livetrade_dir, 'config.py')
     if os.path.exists(config_path):
         try:
-            from livetrade.config import (
+            from components.config import (
                 DEFAULT_TEST_SYMBOL, DEFAULT_TEST_TIMEFRAME,
                 DATA_PROCESSING_WAIT_TIME_IN_SECONDS
             )

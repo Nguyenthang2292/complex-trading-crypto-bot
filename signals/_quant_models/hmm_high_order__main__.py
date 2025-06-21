@@ -21,7 +21,7 @@ if __name__ == "__main__":
     
     # Add parent directories to sys.path using pathlib
     main_dir = str(current_dir.parent.parent.parent)
-    livetrade_dir = str(Path(main_dir) / 'livetrade')
+    livetrade_dir = str(Path(main_dir) / 'components')
     components_dir = str(Path(livetrade_dir) / '_components')
     
     # Update sys.path
@@ -31,7 +31,7 @@ if __name__ == "__main__":
     
     # Import tick processor
     try:
-        from livetrade._components._tick_processor import tick_processor
+        from components._components._tick_processor import tick_processor
     except ImportError:
         logger.error("Failed to import tick_processor. Check the path structure.")
         sys.exit(1)
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     # Import config constants
     try:
         if os.path.exists(os.path.join(livetrade_dir, 'config.py')):
-            from livetrade.config import DEFAULT_TEST_SYMBOL, DEFAULT_TEST_TIMEFRAME, DATA_PROCESSING_WAIT_TIME_IN_SECONDS
+            from components.config import DEFAULT_TEST_SYMBOL, DEFAULT_TEST_TIMEFRAME, DATA_PROCESSING_WAIT_TIME_IN_SECONDS
         else:
             DEFAULT_TEST_SYMBOL, DEFAULT_TEST_TIMEFRAME, DATA_PROCESSING_WAIT_TIME_IN_SECONDS = 'BTCUSDT', '4h', 5
     except ImportError:

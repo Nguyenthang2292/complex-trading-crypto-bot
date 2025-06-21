@@ -10,7 +10,7 @@ from utilities._logger import setup_logging
 logger = setup_logging(module_name="LSTM__function__get_optimal_batch_size", log_level=logging.DEBUG)
 
 try:
-    from livetrade.config import (CPU_BATCH_SIZE, GPU_BATCH_SIZE)
+    from components.config import (CPU_BATCH_SIZE, GPU_BATCH_SIZE)
 except ImportError as e:
     logger.warning("Could not import batch size configs: {0}. Using defaults.".format(e))
     CPU_BATCH_SIZE = 32

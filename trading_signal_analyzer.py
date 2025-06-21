@@ -8,22 +8,19 @@ Usage:
     python trading_signal_analyzer.py
 """
 
-import argparse
 import logging
 import os
 import pandas as pd
 import shutil
 import sys
-import traceback
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from livetrade._components._load_all_symbols_data import load_all_symbols_data
-from livetrade._components._tick_processor import tick_processor
-from livetrade._components._combine_all_dataframes import combine_all_dataframes
-from livetrade.config import (
+from components._components._load_all_symbols_data import load_all_symbols_data
+from components._components._tick_processor import tick_processor
+from components._components._combine_all_dataframes import combine_all_dataframes
+from components.config import (
     DEFAULT_TIMEFRAMES, DEFAULT_CRYPTO_SYMBOLS, MODELS_DIR, 
     SIGNAL_LONG, SIGNAL_SHORT, SIGNAL_NEUTRAL
 )
@@ -32,14 +29,13 @@ from signals.signals_random_forest import get_latest_random_forest_signal, load_
 from signals.signals_hmm import hmm_signals
 from signals.signals_transformer import get_latest_transformer_signal, load_transformer_model, train_and_save_transformer_model
 from signals.signals_cnn_lstm_attention import (
-    train_and_save_global_cnn_lstm_attention_model, 
+    train_cnn_lstm_attention_model, 
     load_cnn_lstm_attention_model, 
     get_latest_cnn_lstm_attention_signal
 )
+
 from utilities._logger import setup_logging
-
 logger = setup_logging(module_name="trading_signal_analyzer", log_level=logging.INFO)
-
 
 class TradingSignalAnalyzer:
     """Phân tích tín hiệu giao dịch từ nhiều model ML sử dụng global models"""
@@ -153,7 +149,7 @@ class TradingSignalAnalyzer:
                     model_name, filename, use_cnn, use_attention = config
                     logger.model(f"Training {model_name} model...")
                     try:
-                        lstm_model, lstm_path = train_and_save_global_cnn_lstm_attention_model(
+                        lstm_model, lstm_path = train_cnn_lstm_attention_model(
                             combined_df,
                             model_filename=filename,
                             use_cnn=use_cnn,

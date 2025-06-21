@@ -6,7 +6,7 @@ from typing import Dict, Optional, Callable
 from binance.websocket.spot.websocket_api import SpotWebsocketAPIClient
 from binance.lib.utils import config_logging
 
-from livetrade.config_api import API_KEY, API_SECRET
+from components.config_api import API_KEY, API_SECRET
 
 class tick_processor_socket():
     def __init__(self, balance_update_callback: Optional[Callable] = None, stream_url: Optional[str] = None):

@@ -11,7 +11,7 @@ main_dir = current_dir.parent.parent
 if str(main_dir) not in sys.path:
     sys.path.insert(0, str(main_dir))
 # Import function to test
-from livetrade._components._combine_all_dataframes import combine_all_dataframes, logger
+from components._combine_all_dataframes import combine_all_dataframes, logger
 
 # Disable logger during tests
 logger.setLevel(logging.CRITICAL)

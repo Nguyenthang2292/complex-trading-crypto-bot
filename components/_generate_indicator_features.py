@@ -12,7 +12,7 @@ from utilities._logger import setup_logging
 
 logger = setup_logging(module_name="_generate_indicator_features", log_level=logging.DEBUG)
 
-from livetrade.config import (
+from components.config import (
     BB_STD_MULTIPLIER, 
     BB_WINDOW, 
     COL_BB_LOWER, 

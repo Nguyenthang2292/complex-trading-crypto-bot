@@ -10,9 +10,9 @@ from typing import List, Dict, Optional, Tuple
 # Add the parent directory to sys.path to allow importing modules from sibling directories
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from livetrade._components._tick_processor import tick_processor
-from livetrade.config import (DEFAULT_TIMEFRAMES,DEFAULT_TOP_SYMBOLS,MIN_DATA_POINTS)
-from signals._components.BPSs__class__PerformanceAnalyzer import PerformanceAnalyzer
+from components.tick_processor import tick_processor
+from components.config import (DEFAULT_TIMEFRAMES,DEFAULT_TOP_SYMBOLS,MIN_DATA_POINTS)
+from signals._components.BestPerformanceSymbols__class__PerformanceAnalyzer import PerformanceAnalyzer
 from utilities._logger import setup_logging
 
 # Setup logging with new format

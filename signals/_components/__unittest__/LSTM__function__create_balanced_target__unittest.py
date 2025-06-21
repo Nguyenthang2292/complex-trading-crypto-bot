@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 # Import the function to test
 from signals._components.LSTM__function__create_balanced_target import create_balanced_target
-from livetrade.config import FUTURE_RETURN_SHIFT
+from components.config import FUTURE_RETURN_SHIFT
 
 class TestCreateBalancedTarget(unittest.TestCase):
     """Test cases for create_balanced_target function."""

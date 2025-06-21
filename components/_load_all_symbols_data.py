@@ -15,11 +15,13 @@ from typing import Dict, List, Optional, Union
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     
 from utilities._logger import setup_logging
-from livetrade.config import (DEFAULT_TIMEFRAMES, MAX_CPU_USAGE_FRACTION, DATA_PROCESSING_WAIT_TIME_IN_SECONDS,
+from components.config import (DEFAULT_TIMEFRAMES,
+                               MAX_CPU_MEMORY_FRACTION,
+                               DATA_PROCESSING_WAIT_TIME_IN_SECONDS,
 )
 
 # Configuration constants
-MAX_CPU_USAGE_FRACTION = MAX_CPU_USAGE_FRACTION*1.5
+MAX_CPU_MEMORY_FRACTION = MAX_CPU_MEMORY_FRACTION*1.5
 MAX_WAIT_TIME = DATA_PROCESSING_WAIT_TIME_IN_SECONDS * 5
 SLEEP_INTERVAL = 0.5
 DEFAULT_MAX_RETRIES = 3
@@ -267,10 +269,10 @@ def load_all_symbols_data(processor, symbols: List[str],
     
     # Configure workers
     available_cpus = os.cpu_count() or 4
-    max_cpu_workers = max(1, int(available_cpus * MAX_CPU_USAGE_FRACTION))
+    max_cpu_workers = max(1, int(available_cpus * MAX_CPU_MEMORY_FRACTION))
     max_workers = max(1, min(max_workers or max_cpu_workers, len(valid_symbols), max_cpu_workers))
     
-    logger.config(f"Using {max_workers} parallel workers (max CPU fraction: {MAX_CPU_USAGE_FRACTION})")
+    logger.config(f"Using {max_workers} parallel workers (max CPU fraction: {MAX_CPU_MEMORY_FRACTION})")
     logger.performance(f"Loading data for {len(valid_symbols)} symbols using {max_workers} parallel workers")
     
     # Create main progress bar

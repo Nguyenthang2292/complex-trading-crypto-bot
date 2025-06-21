@@ -10,15 +10,14 @@ from torch.utils.data import DataLoader
 # Add parent directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from livetrade._components._tick_processor import tick_processor
-from signals._components._gpu_check_availability import check_gpu_availability
-from utilities._gpu_resource_manager import get_gpu_resource_manager
+from components.tick_processor import tick_processor
+from utilities._gpu_resource_manager import get_gpu_resource_manager, check_gpu_availability
 from utilities._logger import setup_logging
 
 # Setup logging
 logger = setup_logging(module_name="signals_transformer__main__", log_level=logging.DEBUG)
 
-from livetrade.config import (
+from components.config import (
     COL_CLOSE,
     CPU_BATCH_SIZE,
     CPU_MODEL_CONFIG,
@@ -39,7 +38,7 @@ from signals.signals_transformer import (
 )
 
 # Import the calculate_features function
-from signals._components._generate_indicator_features import generate_indicator_features
+from components._generate_indicator_features import generate_indicator_features
 
 # Check GPU availability at startup
 gpu_available = check_gpu_availability()

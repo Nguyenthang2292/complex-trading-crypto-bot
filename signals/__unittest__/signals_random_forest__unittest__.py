@@ -15,7 +15,7 @@ from signals.signals_random_forest import (
     train_and_save_global_rf_model,
 )
 
-from livetrade.config import (
+from components.config import (
     COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE,
     COL_BB_UPPER, COL_BB_LOWER,
     SIGNAL_LONG, SIGNAL_SHORT, SIGNAL_NEUTRAL,

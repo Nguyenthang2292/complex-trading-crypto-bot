@@ -7,10 +7,10 @@ import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from livetrade._components._combine_all_dataframes import combine_all_dataframes
-from livetrade._components._load_all_symbols_data import load_all_symbols_data
-from livetrade._components._tick_processor import tick_processor
-from livetrade.config import (
+from components._combine_all_dataframes import combine_all_dataframes
+from components._load_all_symbols_data import load_all_symbols_data
+from components.tick_processor import tick_processor
+from components.config import (
     DATA_PROCESSING_WAIT_TIME_IN_SECONDS,
     DEFAULT_CRYPTO_SYMBOLS,
     DEFAULT_TEST_SYMBOL,

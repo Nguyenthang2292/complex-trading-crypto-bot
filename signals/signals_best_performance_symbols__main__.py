@@ -5,9 +5,9 @@ from tqdm import tqdm
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from livetrade._components._tick_processor import tick_processor
-from livetrade._components._load_all_symbols_data import load_symbol_data
-from livetrade.config import DEFAULT_TIMEFRAMES
+from components.tick_processor import tick_processor
+from components._load_all_symbols_data import load_symbol_data
+from components.config import DEFAULT_TIMEFRAMES
 from signals.signals_best_performance_symbols import (signal_best_performance_symbols, logging_performance_summary)
 from utilities._logger import setup_logging
 

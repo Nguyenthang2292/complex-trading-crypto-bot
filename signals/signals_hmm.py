@@ -10,19 +10,19 @@ python_path = [main_dir]
 runtime_env = {"env_vars": {"PYTHONPATH": os.pathsep.join(python_path)}}
 
 from signals._components.HMM__class__OptimizingParameters import OptimizingParameters
-from livetrade.config import (
+from components.config import (
     SIGNAL_LONG_HMM as LONG,
     SIGNAL_HOLD_HMM as HOLD,
     SIGNAL_SHORT_HMM as SHORT,
     HMM_PROBABILITY_THRESHOLD,
-    MAX_CPU_USAGE_FRACTION
+    MAX_CPU_MEMORY_FRACTION
 )
 from signals._quant_models.hmm_kama import hmm_kama
 from signals._quant_models.hmm_high_order import hmm_high_order
 from utilities._logger import setup_logging
 logger = setup_logging(module_name="signals_hmm", log_level=logging.DEBUG)
 
-num_cpus = int(multiprocessing.cpu_count() * MAX_CPU_USAGE_FRACTION)
+num_cpus = int(multiprocessing.cpu_count() * MAX_CPU_MEMORY_FRACTION)
 
 def initialize_ray():
     """Safely initialize Ray if not already initialized"""

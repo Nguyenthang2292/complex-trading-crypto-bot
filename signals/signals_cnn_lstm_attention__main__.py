@@ -1,3 +1,21 @@
+"""
+UPDATED TO USE UNIFIED API FROM signals_cnn_lstm_attention.py
+
+This script has been updated to use the refactored signals_cnn_lstm_attention.py 
+which provides a unified API for all 4 LSTM model variants:
+
+1. LSTM (use_cnn=False, use_attention=False)
+2. LSTM-Attention (use_cnn=False, use_attention=True)  
+3. CNN-LSTM (use_cnn=True, use_attention=False)
+4. CNN-LSTM-Attention (use_cnn=True, use_attention=True)
+
+Key changes:
+- All models now use train_cnn_lstm_attention_model() for training
+- All models use load_cnn_lstm_attention_model() for loading
+- All models use get_latest_cnn_lstm_attention_signal() for predictions
+- Logic has been preserved while using the new unified API
+"""
+
 import logging
 import os
 import sys
@@ -10,18 +28,21 @@ import torch
 import torch.nn as nn
 import traceback
 
-# Add parent directory to sys.path for importing from sibling directories
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from livetrade._components._combine_all_dataframes import combine_all_dataframes
-from livetrade._components._load_all_symbols_data import load_all_symbols_data
-from livetrade._components._tick_processor import tick_processor
-from livetrade.config import (DEFAULT_CRYPTO_SYMBOLS, DEFAULT_TIMEFRAMES, DEFAULT_TEST_SYMBOL, DEFAULT_TEST_TIMEFRAME)
-from signals._quant_models.lstm_attention_model import (
-    get_latest_lstm_attention_signal,
-    train_and_save_global_lstm_attention_model
+from components._combine_all_dataframes import combine_all_dataframes
+from components._load_all_symbols_data import load_all_symbols_data
+from components.tick_processor import tick_processor
+from components.config import (DEFAULT_CRYPTO_SYMBOLS, 
+                               DEFAULT_TIMEFRAMES, 
+                               DEFAULT_TEST_SYMBOL, 
+                               DEFAULT_TEST_TIMEFRAME)
+
+from signals.signals_cnn_lstm_attention import (
+    train_cnn_lstm_attention_model,
+    load_cnn_lstm_attention_model,
+    get_latest_cnn_lstm_attention_signal
 )
-from signals.signals_cnn_lstm_attention import train_and_save_global_cnn_lstm_attention_model
 from utilities._gpu_resource_manager import get_gpu_resource_manager
 from utilities._logger import setup_logging
 
@@ -288,44 +309,41 @@ def train_model_configuration(
         start_time = time.time()
         
         with gpu_manager.gpu_scope():
-            if config.use_cnn:
-                try:
-                    model, model_path = safe_execute_with_gpu(
-                        train_and_save_global_cnn_lstm_attention_model,
-                        combined_df=combined_df,
-                        model_filename=None,
-                        use_attention=config.use_attention,
-                        use_cnn=config.use_cnn,
-                        look_back=config.look_back,
-                        output_mode=config.output_mode,
-                        attention_heads=config.attention_heads
-                    )
-                except ValueError as ve:
-                    if "no valid sequences created" in str(ve):
-                        log_model_error(logger, config.name, ve, config)
-                        logger.warning("Attempting fallback to LSTM-only model...")
-                        
-                        try:
-                            model, model_path = safe_execute_with_gpu(
-                                train_and_save_global_lstm_attention_model,
-                                combined_df=combined_df,
-                                model_filename=None,
-                                use_attention=config.use_attention,
-                                attention_heads=config.attention_heads
-                            )
-                            logger.warning(f"Successfully trained fallback LSTM model for {config.name}")
-                        except Exception as fallback_error:
-                            logger.error(f"Fallback LSTM training also failed for {config.name}: {fallback_error}")
-                            return None, ""
-                    else:
-                        raise ve
-            else:
-                model, model_path = train_and_save_global_lstm_attention_model(
-                    combined_df=combined_df,
+            try:
+                # Use unified training function for all model types
+                model, model_path = safe_execute_with_gpu(
+                    train_cnn_lstm_attention_model,
+                    df_input=combined_df,
                     model_filename=None,
                     use_attention=config.use_attention,
+                    use_cnn=config.use_cnn,
+                    look_back=config.look_back,
+                    output_mode=config.output_mode,
                     attention_heads=config.attention_heads
                 )
+            except ValueError as ve:
+                if "no valid sequences created" in str(ve):
+                    log_model_error(logger, config.name, ve, config)
+                    logger.warning("Attempting fallback to LSTM-only model...")
+                    
+                    try:
+                        # Use the same unified training function with fallback parameters
+                        model, model_path = safe_execute_with_gpu(
+                            train_cnn_lstm_attention_model,
+                            df_input=combined_df,
+                            model_filename=None,
+                            use_attention=False,        # Fallback to basic LSTM
+                            use_cnn=False,              # Fallback to basic LSTM
+                            look_back=30,               # Reduced look_back for fallback
+                            output_mode='classification',
+                            attention_heads=4           # Reduced attention heads
+                        )
+                        logger.warning(f"Successfully trained fallback LSTM model for {config.name}")
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback LSTM training also failed for {config.name}: {fallback_error}")
+                        return None, ""
+                else:
+                    raise ve
         
         training_time = time.time() - start_time
         
@@ -342,14 +360,14 @@ def train_model_configuration(
         logger.debug(f"Full traceback: {traceback.format_exc()}")
         return None, ""
 
-def test_signal_generation(config: ModelConfiguration, model: object, test_symbol: str, 
+def test_signal_generation(config: ModelConfiguration, model_path: str, test_symbol: str, 
                          test_timeframe: str, all_pairs_data: Dict) -> str:
     """
-    Test signal generation for a specific model
+    Test signal generation for a specific model using unified API
     
     Args:
         config: Model configuration
-        model: Trained model
+        model_path: Path to saved model
         test_symbol: Symbol to test (e.g., 'BTCUSDT')
         test_timeframe: Timeframe to test (e.g., '1h')
         all_pairs_data: All loaded pairs data
@@ -430,12 +448,22 @@ def test_signal_generation(config: ModelConfiguration, model: object, test_symbo
             logger.error(f"Still missing required columns after mapping: {missing_columns}")
             logger.debug(f"Available columns: {list(test_df.columns)}")
             return "ERROR - Missing columns"
-            
-        # Generate signal
-        from typing import cast
-        signal = get_latest_lstm_attention_signal(test_df, cast(nn.Module, model))
-        logger.info(f"{config.name} signal for {test_symbol} {test_timeframe}: {signal}")
         
+        # Generate signal using unified API
+        if not model_path or not os.path.exists(model_path):
+            logger.error(f"Model path not found: {model_path}")
+            return "ERROR - Model not found"
+        
+        # Try to load model using unified API (works for all 4 variants)
+        loaded_data = load_cnn_lstm_attention_model(model_path)
+        if not loaded_data:
+            logger.error(f"Failed to load model from {model_path}")
+            return "ERROR - Failed to load model"
+        
+        model, model_config_dict, data_info, optimization_results = loaded_data
+        signal = get_latest_cnn_lstm_attention_signal(test_df, model, model_config_dict, data_info, optimization_results)
+        
+        logger.info(f"{config.name} signal for {test_symbol} {test_timeframe}: {signal}")
         return signal
         
     except Exception as e:
@@ -512,7 +540,7 @@ def main():
                     'success': True
                 }
                 
-                signal = test_signal_generation(config, model, DEFAULT_TEST_SYMBOL, DEFAULT_TEST_TIMEFRAME, test_data)
+                signal = test_signal_generation(config, model_path, DEFAULT_TEST_SYMBOL, DEFAULT_TEST_TIMEFRAME, test_data)
                 signal_results[config.name] = signal
             else:
                 training_results[config.name] = {

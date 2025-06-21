@@ -17,17 +17,10 @@ from signals._components.LSTM__class__PositionalEncoding import PositionalEncodi
 class LSTMModel(nn.Module):
     """PyTorch LSTM model for cryptocurrency price prediction with multi-layer architecture."""
     
-    def __init__(
-        self, 
-        input_size: int, 
-        hidden_size: int = 64, 
-        num_layers: int = 3, 
-        num_classes: int = 3, 
-        dropout: float = 0.3
-    ) -> None:
+    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 3, 
+                 num_classes: int = 3, dropout: float = 0.3) -> None:
         super().__init__()
         
-        # Validation
         for name, value in [("input_size", input_size), ("hidden_size", hidden_size), ("num_classes", num_classes)]:
             if value <= 0:
                 raise ValueError(f"{name} must be positive, got {value}")
@@ -37,17 +30,14 @@ class LSTMModel(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         
-        # LSTM layers with progressive dimension reduction
         self.lstm1 = nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True)
         self.lstm2 = nn.LSTM(hidden_size, 32, num_layers=1, batch_first=True)
         self.lstm3 = nn.LSTM(32, 16, num_layers=1, batch_first=True)
         
-        # Dropout layers
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(0.2)
         
-        # Classification layers
         self.fc1 = nn.Linear(16, 8)
         self.fc2 = nn.Linear(8, num_classes)
         self.relu = nn.ReLU()
@@ -62,7 +52,7 @@ class LSTMModel(nn.Module):
         lstm_out = self.dropout2(lstm_out)
         
         lstm_out, _ = self.lstm3(lstm_out)
-        lstm_out = lstm_out[:, -1, :] # Take last timestep
+        lstm_out = lstm_out[:, -1, :]
         lstm_out = self.dropout3(lstm_out)
         
         out = self.relu(self.fc1(lstm_out))

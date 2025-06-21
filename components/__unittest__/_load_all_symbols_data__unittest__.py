@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     
 # Import the function to test
-from livetrade._components._load_all_symbols_data import (
+from components._load_all_symbols_data import (
     load_symbol_data,
     load_all_symbols_data,
     _create_progress_bar,
@@ -93,7 +93,7 @@ class TestLoadSymbolData(unittest.TestCase):
             }
         }
         
-    @patch('livetrade._components._load_all_symbols_data._wait_for_data_with_progress')
+    @patch('components._load_all_symbols_data._wait_for_data_with_progress')
     def test_load_symbol_data_single_timeframe(self, mock_wait):
         """Test loading data for a single timeframe."""
         # Setup
@@ -110,7 +110,7 @@ class TestLoadSymbolData(unittest.TestCase):
             self.assertEqual(len(result), 100)
             self.assertTrue(all(col in result.columns for col in ['open', 'high', 'low', 'close', 'volume']))
     
-    @patch('livetrade._components._load_all_symbols_data._wait_for_data_with_progress')
+    @patch('components._load_all_symbols_data._wait_for_data_with_progress')
     def test_load_symbol_data_multi_timeframe(self, mock_wait):
         """Test loading data for multiple timeframes."""
         # Setup
@@ -149,7 +149,7 @@ class TestLoadSymbolData(unittest.TestCase):
         result = load_symbol_data(processor, "BTCUSDT", [])
         self.assertIsNone(result)
     
-    @patch('livetrade._components._load_all_symbols_data._wait_for_data_with_progress')
+    @patch('components._load_all_symbols_data._wait_for_data_with_progress')
     def test_load_symbol_data_error_handling(self, mock_wait):
         """Test error handling in load_symbol_data."""
         # Setup
@@ -192,7 +192,7 @@ class TestLoadAllSymbolsData(unittest.TestCase):
             }
         }
     
-    @patch('livetrade._components._load_all_symbols_data.load_symbol_data')
+    @patch('components._load_all_symbols_data.load_symbol_data')
     def test_load_all_symbols_data_success(self, mock_load_symbol):
         """Test successful loading of data for multiple symbols."""
         # Setup
@@ -210,7 +210,7 @@ class TestLoadAllSymbolsData(unittest.TestCase):
         for symbol, df in result.items():
             self.assertIsInstance(df, pd.DataFrame)
     
-    @patch('livetrade._components._load_all_symbols_data.load_symbol_data')
+    @patch('components._load_all_symbols_data.load_symbol_data')
     def test_load_all_symbols_data_partial_failures(self, mock_load_symbol):
         """Test loading with some failures."""
         # Setup
@@ -252,7 +252,7 @@ class TestLoadAllSymbolsData(unittest.TestCase):
         self.assertIsInstance(result, dict)
         self.assertEqual(len(result), 2)  # Only valid symbols should be processed
     
-    @patch('livetrade._components._load_all_symbols_data.load_symbol_data')
+    @patch('components._load_all_symbols_data.load_symbol_data')
     def test_load_all_symbols_data_with_retries(self, mock_load_symbol):
         """Test retry functionality."""
         # Setup - fail once then succeed
@@ -268,7 +268,7 @@ class TestLoadAllSymbolsData(unittest.TestCase):
         processor = MockProcessor()
         
         # Execute with max_retries=1
-        with patch('livetrade._components._load_all_symbols_data._retry_with_backoff'):
+        with patch('components._load_all_symbols_data._retry_with_backoff'):
             result = load_all_symbols_data(processor, ["ETHUSDT"], max_retries=1)
         
         # Assert
@@ -292,14 +292,14 @@ class TestHelperFunctions(unittest.TestCase):
             'volume': [1000 + i*10 for i in range(100)]
         }, index=dates)
     
-    @patch('livetrade._components._load_all_symbols_data.tqdm')
+    @patch('components._load_all_symbols_data.tqdm')
     def test_create_progress_bar(self, mock_tqdm):
         """Test creating progress bar."""
         _create_progress_bar(100, "Test", "#FF8C00")
         mock_tqdm.assert_called_once()
     
-    @patch('livetrade._components._load_all_symbols_data._create_progress_bar')
-    @patch('livetrade._components._load_all_symbols_data.sleep')
+    @patch('components._load_all_symbols_data._create_progress_bar')
+    @patch('components._load_all_symbols_data.sleep')
     def test_wait_for_data_with_progress(self, mock_sleep, mock_create_bar):
         """Test waiting for data with progress."""
         # Setup
@@ -320,8 +320,8 @@ class TestHelperFunctions(unittest.TestCase):
         mock_create_bar.assert_called_once()
         mock_bar.close.assert_called_once()
     
-    @patch('livetrade._components._load_all_symbols_data._create_progress_bar')
-    @patch('livetrade._components._load_all_symbols_data.time.sleep')
+    @patch('components._load_all_symbols_data._create_progress_bar')
+    @patch('components._load_all_symbols_data.time.sleep')
     def test_retry_with_backoff(self, mock_sleep, mock_create_bar):
         """Test retry with backoff."""
         # Setup
@@ -336,7 +336,7 @@ class TestHelperFunctions(unittest.TestCase):
         mock_bar.update.assert_called()
         mock_bar.close.assert_called_once()
     
-    @patch('livetrade._components._load_all_symbols_data._create_progress_bar')
+    @patch('components._load_all_symbols_data._create_progress_bar')
     def test_calculate_memory_usage(self, mock_create_bar):
         """Test memory usage calculation."""
         # Setup

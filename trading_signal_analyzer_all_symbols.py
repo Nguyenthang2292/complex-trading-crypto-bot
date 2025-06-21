@@ -13,15 +13,15 @@ import pandas as pd
 import shutil
 import sys
 import textwrap
-from pathlib import Path
+import traceback
 from typing import Dict, List, Optional, Tuple, Any, Union
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from livetrade._components._load_all_symbols_data import load_all_symbols_data
-from livetrade._components._tick_processor import tick_processor
-from livetrade._components._combine_all_dataframes import combine_all_dataframes
-from livetrade.config import (
+from components._components._load_all_symbols_data import load_all_symbols_data
+from components._components._tick_processor import tick_processor
+from components._components._combine_all_dataframes import combine_all_dataframes
+from components.config import (
     DEFAULT_TIMEFRAMES, DEFAULT_CRYPTO_SYMBOLS, MODELS_DIR, 
     SIGNAL_LONG, SIGNAL_SHORT, SIGNAL_NEUTRAL
 )
@@ -30,7 +30,7 @@ from signals.signals_random_forest import get_latest_random_forest_signal, load_
 from signals.signals_hmm import hmm_signals
 from signals.signals_transformer import get_latest_transformer_signal, load_transformer_model, train_and_save_transformer_model
 from signals.signals_cnn_lstm_attention import (
-    train_and_save_global_cnn_lstm_attention_model, 
+    train_cnn_lstm_attention_model, 
     load_cnn_lstm_attention_model, 
     get_latest_cnn_lstm_attention_signal
 )
@@ -135,10 +135,10 @@ class TradingSignalAnalyzer:
             model_configs = [
                 ("Random Forest", lambda: train_and_save_global_rf_model(combined_df, model_filename="rf_model_global.joblib")),
                 ("Transformer", lambda: train_and_save_transformer_model(combined_df, model_filename="transformer_model_global.pth")),
-                ("LSTM", lambda: train_and_save_global_cnn_lstm_attention_model(combined_df, model_filename="lstm_model_global.pth", use_cnn=False, use_attention=False)),
-                ("LSTM-Attention", lambda: train_and_save_global_cnn_lstm_attention_model(combined_df, model_filename="lstm_attention_model_global.pth", use_cnn=False, use_attention=True)),
-                ("CNN-LSTM", lambda: train_and_save_global_cnn_lstm_attention_model(combined_df, model_filename="cnn_lstm_model_global.pth", use_cnn=True, use_attention=False)),
-                ("CNN-LSTM-Attention", lambda: train_and_save_global_cnn_lstm_attention_model(combined_df, model_filename="cnn_lstm_attention_model_global.pth", use_cnn=True, use_attention=True))
+                ("LSTM", lambda: train_cnn_lstm_attention_model(combined_df, model_filename="lstm_model_global.pth", use_cnn=False, use_attention=False)),
+                ("LSTM-Attention", lambda: train_cnn_lstm_attention_model(combined_df, model_filename="lstm_attention_model_global.pth", use_cnn=False, use_attention=True)),
+                ("CNN-LSTM", lambda: train_cnn_lstm_attention_model(combined_df, model_filename="cnn_lstm_model_global.pth", use_cnn=True, use_attention=False)),
+                ("CNN-LSTM-Attention", lambda: train_cnn_lstm_attention_model(combined_df, model_filename="cnn_lstm_attention_model_global.pth", use_cnn=True, use_attention=True))
             ]
             
             for model_name, train_func in model_configs:
@@ -156,7 +156,6 @@ class TradingSignalAnalyzer:
             
         except Exception as e:
             logger.error(f"Lỗi trong quá trình train models từ combined data: {e}")
-            import traceback
             traceback.print_exc()
             raise
     
@@ -407,7 +406,6 @@ class TradingSignalAnalyzer:
 
         except Exception as e:
             logger.error(f"Lỗi khi lấy tín hiệu LSTM tổng hợp: {e}")
-            import traceback
             traceback.print_exc()
             return 0
 
@@ -576,7 +574,6 @@ class TradingSignalAnalyzer:
             
         except Exception as e:
             logger.error(f"Lỗi trong quá trình quét thị trường: {e}")
-            import traceback
             traceback.print_exc()
             return {'error': str(e)}
 
@@ -668,7 +665,6 @@ class TradingSignalAnalyzer:
             
         except Exception as e:
             logger.error(f"Lỗi trong quá trình so sánh: {e}")
-            import traceback
             traceback.print_exc()
             return {'error': str(e)}
 

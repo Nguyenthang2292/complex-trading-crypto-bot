@@ -7,7 +7,7 @@ from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score, precisi
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from livetrade.config import (CONFIDENCE_THRESHOLD, CONFIDENCE_THRESHOLDS)
+from components.config import (CONFIDENCE_THRESHOLD, CONFIDENCE_THRESHOLDS)
 from utilities._logger import setup_logging
 
 logger = setup_logging(module_name="LSTM__function__evaluate_models", log_level=logging.DEBUG)

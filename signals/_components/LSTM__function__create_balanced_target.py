@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from utilities._logger import setup_logging
 logger = setup_logging(module_name="LSTM__function__create_balanced_target", log_level=logging.DEBUG)
 
-from livetrade.config import (COL_CLOSE,TARGET_THRESHOLD_LSTM, NEUTRAL_ZONE_LSTM,FUTURE_RETURN_SHIFT)
+from components.config import (COL_CLOSE,TARGET_THRESHOLD_LSTM, NEUTRAL_ZONE_LSTM,FUTURE_RETURN_SHIFT)
 
 def create_balanced_target(
     df: pd.DataFrame, 

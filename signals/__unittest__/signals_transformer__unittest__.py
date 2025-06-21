@@ -25,10 +25,10 @@ from signals.signals_transformer import (
 )
 
 # Import the calculate features function
-from signals._components._generate_indicator_features import generate_indicator_features
+from components._generate_indicator_features import generate_indicator_features
 
 # Import constants for testing
-from livetrade.config import (
+from components.config import (
     SIGNAL_LONG, SIGNAL_SHORT, SIGNAL_NEUTRAL,
 )
 
@@ -768,7 +768,7 @@ class TestBiasAnalysisEdgeCases(unittest.TestCase):
         )
         
         # Should return default thresholds for invalid target index
-        from livetrade.config import BUY_THRESHOLD, SELL_THRESHOLD
+        from components.config import BUY_THRESHOLD, SELL_THRESHOLD
         self.assertEqual(buy_threshold, BUY_THRESHOLD, "Should return default buy threshold for invalid target_idx")
         self.assertEqual(sell_threshold, SELL_THRESHOLD, "Should return default sell threshold for invalid target_idx")
     
@@ -791,7 +791,7 @@ class TestBiasAnalysisEdgeCases(unittest.TestCase):
             )
             
             # Should handle NaN predictions gracefully
-            from livetrade.config import BUY_THRESHOLD, SELL_THRESHOLD
+            from components.config import BUY_THRESHOLD, SELL_THRESHOLD
             self.assertEqual(buy_threshold, BUY_THRESHOLD, "Should return default thresholds when model returns NaN")
             self.assertEqual(sell_threshold, SELL_THRESHOLD, "Should return default thresholds when model returns NaN")
 

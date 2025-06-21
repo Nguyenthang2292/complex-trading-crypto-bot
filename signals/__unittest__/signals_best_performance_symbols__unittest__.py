@@ -22,7 +22,7 @@ from signals.signals_best_performance_symbols import (
     _log_timeframe_stats,
     logging_performance_summary
 )
-from signals._components.BPSs__class__PerformanceAnalyzer import PerformanceAnalyzer
+from signals._components.BestPerformanceSymbols__class__PerformanceAnalyzer import PerformanceAnalyzer
 
 class TestPerformanceAnalyzer(unittest.TestCase):
     """Test cases for PerformanceAnalyzer class"""

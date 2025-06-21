@@ -21,10 +21,12 @@ LSTM_MODEL_FILENAME = "LSTM_model.pth"
 MAX_TRAINING_ROWS = 1000000
 LARGE_DATASET_THRESHOLD_FOR_SMOTE = 50000
 MIN_MEMORY_GB = 1.0
-MAX_CPU_USAGE_FRACTION = 0.5                    # Use 50% of available CPUs
+# Use 50% of available CPUs
+MAX_CPU_MEMORY_FRACTION = 0.5                    
 DATA_PROCESSING_WAIT_TIME_IN_SECONDS = 2
 
-GPU_MEMORY_FRACTION = 0.8                       # Use 80% of GPU memory
+# Use 80% of GPU memory
+MAX_GPU_MEMORY_FRACTION = 0.8                       
 CLEAR_GPU_CACHE_EVERY_N_EPOCHS = 5
 GPU_BATCH_SIZE = 64
 CPU_BATCH_SIZE = 32
@@ -81,7 +83,7 @@ MODEL_FEATURES = [
 
 # Model Architectures
 GPU_MODEL_CONFIG = {
-    'feature_size': 11,  # Can be set dynamically using len(MODEL_FEATURES) if desired
+    'feature_size': 11,  
     'num_layers': 4,
     'd_model': 128,
     'nhead': 8,

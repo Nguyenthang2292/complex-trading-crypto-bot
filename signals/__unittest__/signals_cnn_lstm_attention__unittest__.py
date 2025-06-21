@@ -22,7 +22,7 @@ from typing import Union, Tuple, List
 try:
     from signals.signals_cnn_lstm_attention import (
         preprocess_cnn_lstm_data,
-        split_train_test_data,
+        _split_train_test_data,
         create_cnn_lstm_attention_model,
         train_cnn_lstm_attention_model,
         train_and_save_global_cnn_lstm_attention_model
@@ -31,7 +31,7 @@ except Exception as e:
     print(f"Warning: Could not import main functions: {e}")
     def preprocess_cnn_lstm_data(*args, **kwargs) -> Tuple[np.ndarray, np.ndarray, Union[MinMaxScaler, StandardScaler], List[str]]:
         return np.array([]), np.array([]), MinMaxScaler(), []
-    def split_train_test_data(*args, **kwargs):
+    def _split_train_test_data(*args, **kwargs):
         return np.array([]), np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
     def create_cnn_lstm_attention_model(*args, **kwargs):
         from signals._components.LSTM__class__Models import LSTMModel, LSTMAttentionModel, CNNLSTMAttentionModel
@@ -138,7 +138,7 @@ class TestDataPreprocessing(unittest.TestCase):
         X = np.random.randn(100, 30, 10)
         y = np.random.randint(-1, 2, 100)
         
-        X_train, X_val, X_test, y_train, y_val, y_test = split_train_test_data(
+        X_train, X_val, X_test, y_train, y_val, y_test = _split_train_test_data(
             X, y, train_ratio=0.7, validation_ratio=0.15
         )
         
@@ -156,24 +156,24 @@ class TestDataPreprocessing(unittest.TestCase):
         y = np.random.randint(-1, 2, 50)
         
         with self.assertRaises(ValueError):
-            split_train_test_data(X, y)
+            _split_train_test_data(X, y)
             
         # Test insufficient data
         X_small = np.random.randn(5, 30, 10)
         y_small = np.random.randint(-1, 2, 5)
         
         with self.assertRaises(ValueError):
-            split_train_test_data(X_small, y_small)
+            _split_train_test_data(X_small, y_small)
             
         # Test invalid ratios
         X = np.random.randn(100, 30, 10)
         y = np.random.randint(-1, 2, 100)
         
         with self.assertRaises(ValueError):
-            split_train_test_data(X, y, train_ratio=1.5)
+            _split_train_test_data(X, y, train_ratio=1.5)
             
         with self.assertRaises(ValueError):
-            split_train_test_data(X, y, train_ratio=0.8, validation_ratio=0.5)
+            _split_train_test_data(X, y, train_ratio=0.8, validation_ratio=0.5)
 
 class TestModelCreation(unittest.TestCase):
     """Test model creation functions"""
