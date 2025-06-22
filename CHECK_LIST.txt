@@ -1,3 +1,5 @@
+- Kiểm tra lại Pylint trước để xem file nào đã đạt chuẩn PEP8
+
 - Refactor lại file, loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết theo chuẩn Google, 
 - Sửa từng phần để tránh hạn chế token
 
