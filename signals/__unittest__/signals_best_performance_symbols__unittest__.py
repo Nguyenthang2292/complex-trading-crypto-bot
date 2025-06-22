@@ -242,10 +242,8 @@ class TestMainFunction(unittest.TestCase):
         """Create sample preloaded data for testing"""
         symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT']
         timeframes = ['1h', '4h', '1d']
-        
         data = {}
         np.random.seed(42)
-        
         for symbol in symbols:
             data[symbol] = {}
             for tf in timeframes:
@@ -256,65 +254,85 @@ class TestMainFunction(unittest.TestCase):
                     trend = 0.001  # Mild uptrend
                 else:
                     trend = -0.001  # Downtrend
-                
-                dates = pd.date_range('2024-01-01', periods=50, freq='1h')
-                base_price = 100.0  # Initialize as float
-                prices: list[float] = [base_price] # Explicit type hint for clarity
-                
-                for i in range(49):
+                dates = pd.date_range('2024-01-01', periods=120, freq='1h')  # Increased from 50 to 120
+                base_price = 100.0
+                prices = [base_price]
+                for i in range(119):  # 120 total
                     change = np.random.normal(trend, 0.02)
                     prices.append(prices[-1] * (1 + change))
-                
                 data[symbol][tf] = pd.DataFrame({
                     'open': prices,
                     'high': [p * (1 + abs(np.random.normal(0, 0.005))) for p in prices],
                     'low': [p * (1 - abs(np.random.normal(0, 0.005))) for p in prices],
                     'close': prices,
-                    'volume': np.random.uniform(10000000, 50000000, 50)  
+                    'volume': np.random.uniform(10000000, 50000000, 120)  # match row count
                 }, index=dates)
-        
         return data
     
     @patch('signals.signals_best_performance_symbols.logger')
     def test_signal_best_performance_pairs_success(self, mock_logger):
         """Test successful execution of main function"""
-        result = signal_best_performance_symbols(
-            processor=self.mock_processor,
-            symbols=['BTCUSDT', 'ETHUSDT', 'ADAUSDT'],
-            timeframes=['1h', '4h'],
-            performance_period=20,
-            top_percentage=0.5,
-            include_short_signals=True,
-            preloaded_data=self.sample_preloaded_data
-        )
-        
-        # Check result structure
-        self.assertIsInstance(result, dict)
-        self.assertIn('best_performers', result)
-        self.assertIn('worst_performers', result)
-        self.assertIn('timeframe_analysis', result)
-        self.assertIn('summary', result)
-        
-        # Check summary fields
-        summary = result['summary']
-        required_summary_fields = [
-            'total_symbols_analyzed', 'timeframes_analyzed',
-            'top_performers_count', 'worst_performers_count',
-            'analysis_timestamp', 'include_short_signals'
-        ]
-        
-        for field in required_summary_fields:
-            self.assertIn(field, summary)
-    
-    def test_signal_best_performance_pairs_no_preloaded_data(self):
-        """Test function with no preloaded data"""
-        result = signal_best_performance_symbols(
-            processor=self.mock_processor,
-            preloaded_data=None
-        )
-        
-        self.assertEqual(result, {})
-    
+        try:
+            result = signal_best_performance_symbols(
+                processor=self.mock_processor,
+                symbols=['BTCUSDT', 'ETHUSDT', 'ADAUSDT'],
+                timeframes=['1h', '4h'],
+                performance_period=5,
+                top_percentage=0.5,
+                include_short_signals=True,
+                preloaded_data=self.sample_preloaded_data
+            )
+            
+            # Debug: Print the result to see what we're getting
+            print(f"DEBUG: Result keys: {list(result.keys()) if result else 'Empty dict'}")
+            print(f"DEBUG: Result: {result}")
+            
+            # Check result structure
+            self.assertIsInstance(result, dict)
+            self.assertIn('best_performers', result)
+            self.assertIn('worst_performers', result)
+            self.assertIn('timeframe_analysis', result)
+            self.assertIn('summary', result)
+            
+            # Check summary fields
+            summary = result['summary']
+            required_summary_fields = [
+                'total_symbols_analyzed', 'timeframes_analyzed',
+                'top_performers_count', 'worst_performers_count',
+                'analysis_timestamp', 'include_short_signals'
+            ]
+            
+            for field in required_summary_fields:
+                self.assertIn(field, summary)
+                
+        except Exception as e:
+            print(f"DEBUG: Exception occurred: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def test_signal_best_performance_pairs_missing_preloaded_data(self):
+        """Test function returns {} and logs error if preloaded_data is None"""
+        with patch('signals.signals_best_performance_symbols.logger') as mock_logger:
+            result = signal_best_performance_symbols(
+                processor=self.mock_processor,
+                preloaded_data=None
+            )
+            self.assertEqual(result, {})
+            mock_logger.error.assert_called()
+
+    def test_signal_best_performance_pairs_missing_symbols_in_data(self):
+        """Test function returns {} and logs warning if symbols missing in preloaded_data"""
+        with patch('signals.signals_best_performance_symbols.logger') as mock_logger:
+            # Only ADAUSDT in preloaded_data, but request BTCUSDT
+            result = signal_best_performance_symbols(
+                processor=self.mock_processor,
+                symbols=['BTCUSDT'],
+                preloaded_data={'ADAUSDT': self.sample_preloaded_data['ADAUSDT']}
+            )
+            self.assertEqual(result, {})
+            mock_logger.warning.assert_called()
+
     def test_signal_best_performance_pairs_empty_symbols(self):
         """Test function with empty symbols list"""
         self.mock_processor.get_symbols_list_by_quote_usdt.return_value = []
@@ -331,6 +349,12 @@ class TestUtilityFunctions(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
+        # Add mock_processor for tests that need it
+        self.mock_processor = Mock()
+        self.mock_processor.get_symbols_list_by_quote_usdt.return_value = [
+            'BTCUSDT', 'ETHUSDT', 'USDCUSDT', 'BUSDUSDT', 'ADAUSDT'
+        ]
+        
         self.sample_analysis_result = {
             'best_performers': [
                 {'symbol': 'BTCUSDT', 'composite_score': 0.8},
@@ -432,6 +456,13 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(len(worst), 2)
         self.assertEqual(best[0]['symbol'], 'BTCUSDT')
         self.assertEqual(worst[0]['symbol'], 'LINKUSDT')  # Worst first after reverse
+
+    def test_prepare_symbols_empty(self):
+        """Test prepare_symbols returns [] and logs warning if no symbols"""
+        with patch('signals.signals_best_performance_symbols.logger') as mock_logger:
+            result = _prepare_symbols(self.mock_processor, [], exclude_stable_coins=True)
+            self.assertEqual(result, [])
+            mock_logger.warning.assert_called()
 
 class TestPrivateFunctions(unittest.TestCase):
     """Test cases for private helper functions"""
@@ -621,7 +652,7 @@ class TestAnalyzeTimeframePerformance(unittest.TestCase):
             self.analyzer,
             self.symbol_data,
             '1h',
-            performance_period=20,
+            performance_period=5,
             min_volume_usdt=1000000,
             analyze_for_short=True
         )
@@ -698,6 +729,317 @@ class TestPrintPerformanceSummary(unittest.TestCase):
         # The actual messages include newlines and specific formatting
         mock_logger.analysis.assert_any_call("\n🟢 TOP 2 PERFORMERS (LONG SIGNALS):")
         mock_logger.analysis.assert_any_call("\n🔴 BOTTOM 1 PERFORMERS (SHORT SIGNALS):")
+
+class TestEdgeCases(unittest.TestCase):
+    def setUp(self):
+        self.mock_processor = Mock()
+        self.mock_processor.get_symbols_list_by_quote_usdt.return_value = [
+            'BTCUSDT', 'ETHUSDT', 'USDCUSDT', 'BUSDUSDT', 'ADAUSDT'
+        ]
+        self.sample_preloaded_data = {
+            'BTCUSDT': {'1h': pd.DataFrame()},
+            'ETHUSDT': {'1h': pd.DataFrame()},
+            'ADAUSDT': {'1h': pd.DataFrame()}
+        }
+
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_prepare_symbols_stablecoin_filtering(self, mock_logger):
+        # Should exclude USDCUSDT and BUSDUSDT
+        from signals.signals_best_performance_symbols import _prepare_symbols
+        filtered = _prepare_symbols(self.mock_processor, None, exclude_stable_coins=True)
+        self.assertIn('BTCUSDT', filtered)
+        self.assertIn('ETHUSDT', filtered)
+        self.assertIn('ADAUSDT', filtered)
+        self.assertNotIn('USDCUSDT', filtered)
+        self.assertNotIn('BUSDUSDT', filtered)
+        mock_logger.success.assert_called()
+
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_prepare_symbols_empty(self, mock_logger):
+        from signals.signals_best_performance_symbols import _prepare_symbols
+        result = _prepare_symbols(self.mock_processor, [], exclude_stable_coins=True)
+        self.assertEqual(result, [])
+        mock_logger.warning.assert_called()
+
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_signal_best_performance_symbols_missing_preloaded_data(self, mock_logger):
+        from signals.signals_best_performance_symbols import signal_best_performance_symbols
+        result = signal_best_performance_symbols(
+            processor=self.mock_processor,
+            preloaded_data=None
+        )
+        self.assertEqual(result, {})
+        mock_logger.error.assert_called()
+
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_signal_best_performance_symbols_missing_symbols_in_data(self, mock_logger):
+        from signals.signals_best_performance_symbols import signal_best_performance_symbols
+        # Only ADAUSDT in preloaded_data, but request BTCUSDT
+        result = signal_best_performance_symbols(
+            processor=self.mock_processor,
+            symbols=['BTCUSDT'],
+            preloaded_data={'ADAUSDT': self.sample_preloaded_data['ADAUSDT']}
+        )
+        self.assertEqual(result, {})
+        mock_logger.warning.assert_called()
+
+class TestSafeDictAccessAndEmptyCases(unittest.TestCase):
+    def test_create_result_dict_handles_missing_keys(self):
+        """Test create_result_dict does not crash if performer dicts missing keys"""
+        from signals.signals_best_performance_symbols import _create_result_dict
+        best_performers = [{}]
+        worst_performers = [{}]
+        result = _create_result_dict(
+            best_performers, worst_performers, {}, [], [], 0.3, 0.3, 24, 1000000, True
+        )
+        self.assertIn('best_performers', result)
+        self.assertIn('worst_performers', result)
+        self.assertIn('summary', result)
+        # Should not raise KeyError even if keys are missing
+
+    def test_select_performers_empty(self):
+        """Test _select_performers returns empty lists if input is empty"""
+        from signals.signals_best_performance_symbols import _select_performers
+        best, worst = _select_performers([], 0.3, 0.3, True)
+        self.assertEqual(best, [])
+        self.assertEqual(worst, [])
+
+    def test_calculate_timeframe_statistics_empty(self):
+        """Test _calculate_timeframe_statistics returns correct defaults for empty input"""
+        from signals.signals_best_performance_symbols import _calculate_timeframe_statistics
+        stats = _calculate_timeframe_statistics([], True)
+        self.assertEqual(stats['symbols_processed'], 0)
+        self.assertEqual(stats['avg_score'], 0)
+        self.assertEqual(stats['median_score'], 0)
+        self.assertEqual(stats['avg_return'], 0)
+        self.assertEqual(stats['avg_volatility'], 0)
+        self.assertEqual(stats['avg_short_score'], 0)
+        self.assertIsNone(stats['top_performer'])
+        self.assertIsNone(stats['worst_performer'])
+
+class TestLoggingAndUtilityFunctions(unittest.TestCase):
+    def setUp(self):
+        self.analysis_result = {
+            'best_performers': [
+                {'symbol': 'BTCUSDT', 'composite_score': 0.85, 'timeframe_scores': {'1h': 0.8, '4h': 0.9}},
+                {'symbol': 'ETHUSDT', 'composite_score': 0.75, 'timeframe_scores': {'1h': 0.7, '4h': 0.8}}
+            ],
+            'worst_performers': [
+                {'symbol': 'ADAUSDT', 'composite_score': 0.25, 'timeframe_scores': {'1h': 0.3, '4h': 0.2}}
+            ],
+            'timeframe_analysis': {
+                '1h': {
+                    'symbol_metrics': [
+                        {'symbol': 'BTCUSDT', 'composite_score': 0.8},
+                        {'symbol': 'ETHUSDT', 'composite_score': 0.7},
+                        {'symbol': 'ADAUSDT', 'composite_score': 0.3}
+                    ]
+                },
+                '4h': {
+                    'symbol_metrics': [
+                        {'symbol': 'BTCUSDT', 'composite_score': 0.9},
+                        {'symbol': 'ETHUSDT', 'composite_score': 0.8},
+                        {'symbol': 'ADAUSDT', 'composite_score': 0.2}
+                    ]
+                }
+            },
+            'summary': {
+                'total_symbols_analyzed': 10,
+                'timeframes_analyzed': ['1h', '4h', '1d'],
+                'top_performers_count': 2,
+                'worst_performers_count': 1,
+                'analysis_timestamp': datetime.now(timezone.utc).isoformat()
+            }
+        }
+
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_logging_performance_summary(self, mock_logger):
+        from signals.signals_best_performance_symbols import logging_performance_summary
+        logging_performance_summary(self.analysis_result)
+        # Should call logger.analysis several times
+        self.assertGreater(mock_logger.analysis.call_count, 5)
+        # Test with empty results
+        mock_logger.reset_mock()
+        logging_performance_summary({})
+        mock_logger.warning.assert_called_once()
+
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_logging_performance_section_calls(self, mock_logger):
+        from signals.signals_best_performance_symbols import logging_performance_summary
+        logging_performance_summary(self.analysis_result)
+        # Check that section headers are printed
+        mock_logger.analysis.assert_any_call("\n🟢 TOP 2 PERFORMERS (LONG SIGNALS):")
+        mock_logger.analysis.assert_any_call("\n🔴 BOTTOM 1 PERFORMERS (SHORT SIGNALS):")
+
+    def test_get_top_performers_by_timeframe(self):
+        from signals.signals_best_performance_symbols import get_top_performers_by_timeframe
+        top_performers = get_top_performers_by_timeframe(self.analysis_result, '1h', top_n=1)
+        self.assertEqual(len(top_performers), 1)
+        self.assertEqual(top_performers[0]['symbol'], 'BTCUSDT')
+
+    def test_get_top_performers_invalid_timeframe(self):
+        from signals.signals_best_performance_symbols import get_top_performers_by_timeframe
+        top_performers = get_top_performers_by_timeframe(self.analysis_result, '5m', top_n=2)
+        self.assertEqual(top_performers, [])
+
+    def test_get_worst_performers_by_timeframe(self):
+        from signals.signals_best_performance_symbols import get_worst_performers_by_timeframe
+        worst_performers = get_worst_performers_by_timeframe(self.analysis_result, '1h', top_n=1)
+        self.assertEqual(len(worst_performers), 1)
+        self.assertEqual(worst_performers[0]['symbol'], 'ADAUSDT')
+
+    def test_get_short_signal_candidates(self):
+        from signals.signals_best_performance_symbols import get_short_signal_candidates
+        # Add timeframe_scores to worst_performers for testing
+        analysis_result = self.analysis_result.copy()
+        analysis_result['worst_performers'][0]['timeframe_scores'] = {
+            '1h': {'short_composite_score': 0.7},
+            '4h': {'short_composite_score': 0.8}
+        }
+        candidates = get_short_signal_candidates(analysis_result, min_short_score=0.6)
+        self.assertIsInstance(candidates, list)
+        self.assertGreaterEqual(candidates[0]['avg_short_score'], 0.6)
+
+class TestPrivateHelpersAndEdgeCases(unittest.TestCase):
+    def setUp(self):
+        self.symbol_metrics = [
+            {
+                'symbol': 'BTCUSDT',
+                'composite_score': 0.85,
+                'total_return': 0.15,
+                'volatility': 0.05,
+                'short_composite_score': 0.35
+            },
+            {
+                'symbol': 'ETHUSDT',
+                'composite_score': 0.75,
+                'total_return': 0.10,
+                'volatility': 0.06,
+                'short_composite_score': 0.45
+            },
+            {
+                'symbol': 'SOLUSDT',
+                'composite_score': 0.65,
+                'total_return': 0.08,
+                'volatility': 0.07,
+                'short_composite_score': 0.55
+            }
+        ]
+
+    def test_calculate_timeframe_statistics(self):
+        from signals.signals_best_performance_symbols import _calculate_timeframe_statistics
+        stats = _calculate_timeframe_statistics(self.symbol_metrics, True)
+        required_keys = [
+            'symbols_processed', 'avg_score', 'median_score', 'avg_return',
+            'avg_volatility', 'avg_short_score', 'top_performer', 'worst_performer'
+        ]
+        for key in required_keys:
+            self.assertIn(key, stats)
+        self.assertEqual(stats['symbols_processed'], 3)
+        self.assertAlmostEqual(stats['avg_score'], 0.75, places=2)
+        self.assertAlmostEqual(stats['median_score'], 0.75, places=2)
+        self.assertAlmostEqual(stats['avg_return'], 0.11, places=2)
+        self.assertAlmostEqual(stats['avg_volatility'], 0.06, places=2)
+        self.assertAlmostEqual(stats['avg_short_score'], 0.45, places=2)
+        self.assertEqual(stats['top_performer']['symbol'], 'BTCUSDT')
+        self.assertEqual(stats['worst_performer']['symbol'], 'SOLUSDT')
+
+    def test_calculate_timeframe_statistics_empty(self):
+        from signals.signals_best_performance_symbols import _calculate_timeframe_statistics
+        stats = _calculate_timeframe_statistics([], True)
+        self.assertEqual(stats['symbols_processed'], 0)
+        self.assertEqual(stats['avg_score'], 0)
+        self.assertEqual(stats['median_score'], 0)
+        self.assertEqual(stats['avg_return'], 0)
+        self.assertEqual(stats['avg_volatility'], 0)
+        self.assertEqual(stats['avg_short_score'], 0)
+        self.assertIsNone(stats['top_performer'])
+        self.assertIsNone(stats['worst_performer'])
+
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_log_timeframe_stats(self, mock_logger):
+        from signals.signals_best_performance_symbols import _log_timeframe_stats
+        stats = {
+            'processed': 10,
+            'no_timeframe': 2,
+            'insufficient_data': 3,
+            'low_volume': 1
+        }
+        _log_timeframe_stats('1h', stats)
+        self.assertEqual(mock_logger.performance.call_count, 5)
+        mock_logger.performance.assert_any_call("Timeframe 1h results:")
+        mock_logger.performance.assert_any_call("  - Processed successfully: 10")
+        mock_logger.performance.assert_any_call("  - Skipped (no timeframe data): 2")
+        mock_logger.performance.assert_any_call("  - Skipped (insufficient data): 3")
+        mock_logger.performance.assert_any_call("  - Skipped (low volume): 1")
+
+    def test_create_result_dict(self):
+        from signals.signals_best_performance_symbols import _create_result_dict
+        best_performers = [{'symbol': 'BTCUSDT', 'composite_score': 0.85}]
+        worst_performers = [{'symbol': 'ADAUSDT', 'composite_score': 0.25}]
+        timeframe_results = {'1h': {'symbol_metrics': []}}
+        symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT']
+        timeframes = ['1h', '4h']
+        result = _create_result_dict(
+            best_performers, worst_performers, timeframe_results,
+            symbols, timeframes, 0.3, 0.3, 24, 1000000, True
+        )
+        self.assertIn('best_performers', result)
+        self.assertIn('worst_performers', result)
+        self.assertIn('timeframe_analysis', result)
+        self.assertIn('summary', result)
+        summary = result['summary']
+        self.assertEqual(summary['total_symbols_analyzed'], 3)
+        self.assertEqual(summary['timeframes_analyzed'], ['1h', '4h'])
+        self.assertEqual(summary['top_performers_count'], 1)
+        self.assertEqual(summary['worst_performers_count'], 1)
+        self.assertEqual(summary['top_percentage'], 0.3)
+        self.assertEqual(summary['short_percentage'], 0.3)
+        self.assertEqual(summary['performance_period'], 24)
+        self.assertEqual(summary['min_volume_usdt'], 1000000)
+        self.assertEqual(summary['include_short_signals'], True)
+
+class TestSpecialEdgeCases(unittest.TestCase):
+    def test_calculate_timeframe_statistics_missing_keys(self):
+        from signals.signals_best_performance_symbols import _calculate_timeframe_statistics
+        # symbol_metrics missing some keys
+        symbol_metrics = [
+            {'symbol': 'BTCUSDT'},  # missing composite_score, etc.
+            {'composite_score': 0.5},  # missing symbol
+            {}  # completely empty
+        ]
+        stats = _calculate_timeframe_statistics(symbol_metrics, True)
+        self.assertIn('avg_score', stats)
+        self.assertIn('avg_short_score', stats)
+        # Should not raise
+
+    def test_get_short_signal_candidates_no_timeframe_scores(self):
+        from signals.signals_best_performance_symbols import get_short_signal_candidates
+        analysis_result = {
+            'worst_performers': [
+                {'symbol': 'ADAUSDT', 'composite_score': 0.3}  # no timeframe_scores
+            ]
+        }
+        candidates = get_short_signal_candidates(analysis_result, min_short_score=0.6)
+        self.assertEqual(candidates, [])
+
+    @patch('signals.signals_best_performance_symbols.logger')
+    def test_logging_performance_summary_performer_missing_keys(self, mock_logger):
+        from signals.signals_best_performance_symbols import logging_performance_summary
+        analysis_result = {
+            'best_performers': [{}],  # missing all keys
+            'worst_performers': [{}],
+            'summary': {
+                'total_symbols_analyzed': 1,
+                'timeframes_analyzed': ['1h'],
+                'top_performers_count': 1,
+                'worst_performers_count': 1,
+                'analysis_timestamp': datetime.now(timezone.utc).isoformat()
+            }
+        }
+        # Should not raise KeyError
+        logging_performance_summary(analysis_result)
+        self.assertTrue(mock_logger.analysis.called)
 
 if __name__ == '__main__':
     # Configure unittest to run with verbose output

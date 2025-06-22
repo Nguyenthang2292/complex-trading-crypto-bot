@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from time import sleep
 from tqdm import tqdm
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any, cast
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -42,20 +42,41 @@ logger = setup_logging(module_name="_load_all_symbols_data", log_level=logging.D
 _CACHE_LOCK = threading.Lock()
 
 def _create_progress_bar(total: int, desc: str, color: str, unit: str = 'it', leave: bool = True) -> tqdm:
-    """Create standardized progress bar with consistent styling."""
+    """Creates a standardized tqdm progress bar.
+
+    Args:
+        total: The total number of iterations.
+        desc: The description to display.
+        color: The color of the progress bar.
+        unit: The unit for the iteration.
+        leave: Whether to leave the progress bar after completion.
+
+    Returns:
+        A tqdm progress bar instance.
+    """
     return tqdm(
         total=total, desc=desc, bar_format=TQDM_FORMAT, colour=color, unit=unit, leave=leave
     )
 
-def _wait_for_data_with_progress(processor, cache_key: tuple, symbol: str, tf: str) -> Optional[pd.DataFrame]:
-    """Wait for data processing with visual progress feedback."""
+def _wait_for_data_with_progress(processor: Any, cache_key: tuple, symbol: str, tf: str) -> Optional[pd.DataFrame]:
+    """Waits for data to appear in the processor's cache with a progress bar.
+
+    Args:
+        processor: The data processor instance.
+        cache_key: The tuple key for the cache.
+        symbol: The trading symbol.
+        tf: The timeframe.
+
+    Returns:
+        The DataFrame from the cache, or None if it times out.
+    """
     wait_pbar = _create_progress_bar(
-        total=MAX_WAIT_TIME, desc=f"Waiting for {symbol} ({tf})", 
+        total=int(MAX_WAIT_TIME / SLEEP_INTERVAL), desc=f"Waiting for {symbol} ({tf})", 
         color=TQDM_COLORS['waiting'], unit='s', leave=False
     )
     
-    wait_time = 0
-    while wait_time < MAX_WAIT_TIME:
+    start_time = time.time()
+    while time.time() - start_time < MAX_WAIT_TIME:
         with _CACHE_LOCK:
             if cache_key in processor.df_cache:
                 cached_data = processor.df_cache[cache_key]
@@ -64,77 +85,68 @@ def _wait_for_data_with_progress(processor, cache_key: tuple, symbol: str, tf: s
                     return cached_data.copy()
         
         sleep(SLEEP_INTERVAL)
-        wait_time += SLEEP_INTERVAL
-        wait_pbar.update(SLEEP_INTERVAL)
+        wait_pbar.update(1)
     
     wait_pbar.close()
     return None
 
-def load_symbol_data(processor, symbol: str = "", timeframes: Optional[List[str]] = None, load_multi_timeframes: bool = False) -> Optional[Union[Dict[str, pd.DataFrame], pd.DataFrame]]:
-    """
-    Load and preprocess trading data for a single symbol across specified timeframes.
-    
+def load_symbol_data(
+    processor: Any,
+    symbol: str,
+    timeframes: Optional[List[str]] = None,
+    load_multi_timeframes: bool = False
+) -> Optional[Union[Dict[str, pd.DataFrame], pd.DataFrame]]:
+    """Loads and preprocesses trading data for a single symbol.
+
+    This function handles fetching data for one or more timeframes,
+    utilizing a shared cache and a retry mechanism.
+
     Args:
-        processor: Data processor with df_cache and get_historic_data_by_symbol method
-        symbol: Trading symbol (e.g., 'BTCUSDT', 'EURUSD')
-        timeframes: List of timeframes ['1m', '5m', '1h'] (None for defaults)
-        load_multi_timeframes: Return dict of timeframes vs single DataFrame
-        
+        processor: An instance of a data processor class that has `df_cache`
+            and `get_historic_data_by_symbol` methods.
+        symbol: The trading symbol to load (e.g., 'BTCUSDT').
+        timeframes: A list of timeframes to load (e.g., ['1h', '4h']). If None,
+            defaults are used.
+        load_multi_timeframes: If True, returns a dictionary of DataFrames keyed
+            by timeframe. If False, returns a single DataFrame for the first
+            valid timeframe.
+
     Returns:
-        Dict[str, pd.DataFrame] if load_multi_timeframes=True, else pd.DataFrame
-        None if loading fails for all timeframes
+        A dictionary of DataFrames if `load_multi_timeframes` is True, a single
+        DataFrame otherwise, or None if loading fails.
     """
-    # Validate inputs
-    if not symbol or not isinstance(symbol, str) or not symbol.strip() or not hasattr(processor, 'df_cache') or not hasattr(processor, 'get_historic_data_by_symbol'):
-        logger.error(f"Invalid symbol: {symbol}" if symbol else "Invalid processor: missing required attributes")
+    if not (symbol and isinstance(symbol, str) and hasattr(processor, 'df_cache')):
+        logger.error(f"Invalid input: symbol='{symbol}' or processor is invalid.")
         return None
     
-    # Handle timeframes validation - check for empty list before setting defaults
-    if timeframes is not None and (not isinstance(timeframes, list) or len(timeframes) == 0):
-        logger.error(f"Invalid timeframes: {timeframes}")
-        return None
+    if timeframes is None:
+        timeframes = DEFAULT_TIMEFRAMES if load_multi_timeframes else [DEFAULT_TIMEFRAMES[0]]
     
-    timeframes = timeframes or (DEFAULT_TIMEFRAMES if load_multi_timeframes else DEFAULT_TIMEFRAMES[:1])
     logger.data(f"Loading data for {symbol} with timeframes: {timeframes}")
-    result_dict = {}
+    result_dict: Dict[str, pd.DataFrame] = {}
     
-    # Create timeframe progress bar if needed
-    timeframe_pbar = None
-    if load_multi_timeframes and len(timeframes) > 1:
-        timeframe_pbar = _create_progress_bar(
-            total=len(timeframes), desc=f"Loading {symbol} timeframes",
-            color=TQDM_COLORS['timeframes'], leave=False
-        )
+    pbar_desc = f"Loading {symbol}"
+    timeframe_pbar = _create_progress_bar(
+        total=len(timeframes), desc=pbar_desc,
+        color=TQDM_COLORS['timeframes'], leave=False
+    ) if len(timeframes) > 1 else None
     
     for tf in timeframes:
-        if not isinstance(tf, str):
-            logger.warning(f"Skipping invalid timeframe: {tf}")
-            if timeframe_pbar: timeframe_pbar.update(1)
-            continue
-            
         try:
-            logger.process(f"Processing {tf} data for {symbol}")
             cache_key = (symbol, tf)
             data = None
             
-            # Check cache first
             with _CACHE_LOCK:
                 if cache_key in processor.df_cache:
-                    cached_data = processor.df_cache[cache_key]
+                    cached_data = processor.df_cache.get(cache_key)
                     if isinstance(cached_data, pd.DataFrame) and not cached_data.empty:
                         data = cached_data.copy()
-                        logger.memory(f"Found cached data for {symbol} ({tf})")
-            
-            # Fetch data if not in cache
+                        logger.memory(f"Cache hit for {symbol} ({tf})")
+
             if data is None:
-                logger.network(f"Requesting data for {symbol} ({tf})")
-                try:
-                    processor.get_historic_data_by_symbol(symbol, tf)
-                    data = _wait_for_data_with_progress(processor, cache_key, symbol, tf)
-                except Exception as e:
-                    logger.error(f"Error requesting data for {symbol} ({tf}): {e}")
-                    if timeframe_pbar: timeframe_pbar.update(1)
-                    continue
+                logger.network(f"Cache miss. Requesting data for {symbol} ({tf})")
+                processor.get_historic_data_by_symbol(symbol, tf)
+                data = _wait_for_data_with_progress(processor, cache_key, symbol, tf)
                 
                 if data is None:
                     logger.warning(f"Timeout waiting for data: {symbol} ({tf})")
@@ -143,40 +155,41 @@ def load_symbol_data(processor, symbol: str = "", timeframes: Optional[List[str]
 
             logger.success(f"Successfully processed {tf} data for {symbol}, shape: {data.shape}")
             
-            # Handle result based on mode
             if load_multi_timeframes:
                 result_dict[tf] = data
                 if timeframe_pbar:
-                    timeframe_pbar.set_postfix({'Status': f'✓ {tf}', 'Rows': data.shape[0]})
                     timeframe_pbar.update(1)
             else:
                 if timeframe_pbar: timeframe_pbar.close()
                 return data
                 
         except Exception as e:
-            logger.error(f"Unexpected error loading {tf} data for {symbol}: {e}")
+            logger.error(f"Failed to load {tf} for {symbol}: {e}")
             if timeframe_pbar: timeframe_pbar.update(1)
             if not load_multi_timeframes: return None
     
     if timeframe_pbar: timeframe_pbar.close()
     
     if load_multi_timeframes:
-        if not result_dict:
-            logger.error(f"Failed to load any timeframe data for {symbol}")
-            return None
-        logger.success(f"Loaded {len(result_dict)} timeframes for {symbol}")
-        return result_dict
+        return result_dict if result_dict else None
     
-    logger.warning(f"No data loaded for {symbol}")
     return None
 
 def _retry_with_backoff(symbol: str, wait_time: float, attempt_type: str) -> None:
-    """Execute retry wait with visual progress feedback."""
+    """Executes a retry wait with a visual progress bar.
+
+    Args:
+        symbol: The symbol being retried.
+        wait_time: The duration to wait in seconds.
+        attempt_type: The type of attempt (e.g., "Retrying", "Error Retry").
+    """
+    pbar_color = TQDM_COLORS['retry'] if 'retry' in attempt_type.lower() else TQDM_COLORS['error_retry']
     retry_pbar = _create_progress_bar(
         total=int(wait_time * 10),
         desc=f"{attempt_type} {symbol}",
-        color=TQDM_COLORS['retry'] if 'retry' in attempt_type.lower() else TQDM_COLORS['error_retry'],
-        unit='0.1s', leave=False
+        color=pbar_color,
+        unit='s',
+        leave=False
     )
     
     for _ in range(int(wait_time * 10)):
@@ -185,204 +198,191 @@ def _retry_with_backoff(symbol: str, wait_time: float, attempt_type: str) -> Non
     retry_pbar.close()
 
 def _calculate_memory_usage(dfs: Dict[str, Optional[Union[Dict[str, pd.DataFrame], pd.DataFrame]]]) -> float:
-    """Calculate total memory usage of loaded data with progress tracking."""
+    """Calculates the total memory usage of loaded dataframes.
+
+    Args:
+        dfs: A dictionary mapping symbols to their loaded data.
+
+    Returns:
+        The total memory usage in megabytes.
+    """
     memory_pbar = _create_progress_bar(
         total=len(dfs), desc="Calculating memory usage", 
         color=TQDM_COLORS['memory'], leave=False
     )
     
-    total_memory_mb = 0
-    for symbol, df in dfs.items():
-        if df is not None:
-            if isinstance(df, dict):
-                for tf_df in df.values():
-                    if isinstance(tf_df, pd.DataFrame):
-                        total_memory_mb += tf_df.memory_usage(deep=True).sum() / (1024 * 1024)
-            elif isinstance(df, pd.DataFrame):
-                total_memory_mb += df.memory_usage(deep=True).sum() / (1024 * 1024)
+    total_memory_mb = 0.0
+    for symbol, data in dfs.items():
+        if isinstance(data, dict):
+            for tf_df in data.values():
+                if isinstance(tf_df, pd.DataFrame):
+                    total_memory_mb += tf_df.memory_usage(deep=True).sum()
+        elif isinstance(data, pd.DataFrame):
+            total_memory_mb += data.memory_usage(deep=True).sum()
         
-        memory_pbar.set_postfix({'Symbol': symbol, 'Total MB': f"{total_memory_mb:.1f}"})
         memory_pbar.update(1)
     
     memory_pbar.close()
-    return total_memory_mb
+    return total_memory_mb / (1024 * 1024)
 
-def load_all_symbols_data(processor, symbols: List[str], 
-                        load_multi_timeframes: bool = True, 
-                        timeframes: Optional[List[str]] = None,
-                        max_retries: int = DEFAULT_MAX_RETRIES,
-                        max_workers: Optional[int] = None) -> Dict[str, Optional[Union[Dict[str, pd.DataFrame], pd.DataFrame]]]:
-    """
-    Load trading data for multiple symbols with parallel processing and comprehensive error handling.
-    
+def _safe_time_range(index: pd.Index) -> str:
+    """Safely formats the min/max of a pandas Index as a time range string.
+
     Args:
-        processor: Data processor instance with caching capabilities
-        symbols: List of trading symbols to load ['BTCUSDT', 'ETHUSDT', ...]
-        load_multi_timeframes: Load multiple timeframes per symbol
-        timeframes: Specific timeframes to load (None for defaults)
-        max_retries: Maximum retry attempts per symbol (default: 3)
-        max_workers: Max parallel workers (None for auto-detection)
-        
+        index: The pandas Index to format.
+
     Returns:
-        Dict mapping symbols to their loaded data:
-        - Key: symbol string
-        - Value: DataFrame (single timeframe) or Dict[str, DataFrame] (multi-timeframe) or None (failed)
+        A string representing the time range, or 'N/A' if not applicable.
     """
-    # Validate inputs
-    if not symbols or not isinstance(symbols, list) or not hasattr(processor, 'df_cache') or not hasattr(processor, 'get_historic_data_by_symbol'):
-        logger.error(f"{'Invalid symbols list' if symbols else 'Invalid processor'}")
-        return {}
-    
-    # Filter valid symbols
-    valid_symbols = [s for s in symbols if isinstance(s, str) and s.strip()]
-    if len(valid_symbols) != len(symbols):
-        logger.warning(f"Filtered out {len(symbols) - len(valid_symbols)} invalid symbols")
-    
-    if not valid_symbols:
-        logger.error("No valid symbols to process")
-        return {}
-    
-    start_time = time.time()
-    
-    # Define retry function
-    def _load_with_retry(symbol: str, retries_left: int = max_retries, backoff_factor: float = DEFAULT_BACKOFF_FACTOR) -> Optional[Union[Dict[str, pd.DataFrame], pd.DataFrame]]:
-        try:
-            data = load_symbol_data(processor, symbol, timeframes, load_multi_timeframes)
+    try:
+        if not isinstance(index, (pd.Index, pd.DatetimeIndex)) or index.empty:
+            return "N/A"
+
+        # The min/max of an empty index can raise a ValueError
+        if index.empty:
+            return "N/A"
             
-            if data is None and retries_left > 0:
-                wait_time = backoff_factor * (max_retries - retries_left + 1)
-                logger.warning(f"Failed to load {symbol}, retrying in {wait_time:.1f}s... ({retries_left} attempts left)")
-                _retry_with_backoff(symbol, wait_time, "Retrying")
-                return _load_with_retry(symbol, retries_left - 1, backoff_factor)
-                
+        idx_min, idx_max = index.min(), index.max()
+
+        # Check if the index is of a datetime type
+        if pd.api.types.is_datetime64_any_dtype(index.dtype):
+            min_val = cast(pd.Timestamp, idx_min)
+            max_val = cast(pd.Timestamp, idx_max)
+            
+            if pd.isna(min_val) or pd.isna(max_val):
+                return "N/A"
+            
+            return f"{min_val.strftime('%Y-%m-%d')} to {max_val.strftime('%Y-%m-%d')}"
+
+        return f"Index {idx_min} to {idx_max}"
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Could not format time range for index: {e}")
+        return "Invalid time range"
+
+def _load_symbol_with_retry(
+    processor: Any,
+    symbol: str,
+    timeframes: Optional[List[str]],
+    load_multi_timeframes: bool,
+    max_retries: int,
+    attempt: int = 1
+) -> Optional[Union[Dict[str, pd.DataFrame], pd.DataFrame]]:
+    """
+    Wrapper to load symbol data with retries and exponential backoff.
+
+    Args:
+        processor: The data processor instance.
+        symbol: The trading symbol.
+        timeframes: A list of timeframes.
+        load_multi_timeframes: Flag to load multiple timeframes.
+        max_retries: Maximum number of retries.
+        attempt: The current retry attempt number.
+
+    Returns:
+        The loaded data for the symbol, or None if all retries fail.
+    """
+    try:
+        data = load_symbol_data(processor, symbol, timeframes, load_multi_timeframes)
+        # A non-empty DataFrame or a non-empty Dict of DataFrames is a success.
+        if (isinstance(data, pd.DataFrame) and not data.empty) or (isinstance(data, dict) and data):
             return data
+        logger.warning(f"Initial data load for {symbol} returned empty. Retrying...")
+    except Exception as e:
+        logger.error(f"Exception on initial load for {symbol}: {e}. Retrying...")
+
+    if attempt > max_retries:
+        logger.error(f"All {max_retries} retries failed for {symbol}.")
+        return None
+
+    wait_time = DEFAULT_BACKOFF_FACTOR ** (attempt - 1)
+    _retry_with_backoff(symbol, wait_time, f"Retry {attempt}/{max_retries}")
+    return _load_symbol_with_retry(
+        processor, symbol, timeframes, load_multi_timeframes, max_retries, attempt + 1
+    )
+
+def load_all_symbols_data(
+    processor: Any,
+    symbols: List[str],
+    timeframes: Optional[List[str]] = None,
+    load_multi_timeframes: bool = True,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    max_workers: Optional[int] = None
+) -> Dict[str, Optional[Union[Dict[str, pd.DataFrame], pd.DataFrame]]]:
+    """Loads trading data for multiple symbols using parallel processing.
+
+    This function employs a thread pool to fetch data for multiple symbols
+    concurrently. It includes a retry mechanism with exponential backoff for
+    handling transient failures.
+
+    Args:
+        processor: An instance of a data processor with caching capabilities.
+        symbols: A list of trading symbols to load.
+        timeframes: A list of timeframes to load for each symbol.
+        load_multi_timeframes: If True, loads multiple timeframes per symbol.
+        max_retries: The maximum number of retry attempts for a failed symbol.
+        max_workers: The maximum number of parallel worker threads. Defaults to
+            the number of available CPU cores.
+
+    Returns:
+        A dictionary mapping each symbol to its loaded data. The value can be
+        a DataFrame, a dictionary of DataFrames, or None if loading failed.
+    """
+    if not (symbols and isinstance(symbols, list) and hasattr(processor, 'df_cache')):
+        logger.error("Invalid input: 'symbols' must be a non-empty list and 'processor' must be valid.")
+        return {}
+
+    all_data: Dict[str, Optional[Union[Dict[str, pd.DataFrame], pd.DataFrame]]] = {}
+    failed_symbols: List[str] = []
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_symbol = {
+            executor.submit(
+                _load_symbol_with_retry,
+                processor,
+                symbol,
+                timeframes,
+                load_multi_timeframes,
+                max_retries
+            ): symbol for symbol in symbols
+        }
         
-        except Exception as e:
-            if retries_left > 0:
-                wait_time = backoff_factor * (max_retries - retries_left + 1)
-                logger.warning(f"Error loading {symbol}: {e}, retrying in {wait_time:.1f}s... ({retries_left} attempts left)")
-                _retry_with_backoff(symbol, wait_time, "Error retry")
-                return _load_with_retry(symbol, retries_left - 1, backoff_factor)
-            else:
-                logger.error(f"Failed to load {symbol} after {max_retries} attempts: {e}")
-                return None
-    
-    # Configure workers
-    available_cpus = os.cpu_count() or 4
-    max_cpu_workers = max(1, int(available_cpus * MAX_CPU_MEMORY_FRACTION))
-    max_workers = max(1, min(max_workers or max_cpu_workers, len(valid_symbols), max_cpu_workers))
-    
-    logger.config(f"Using {max_workers} parallel workers (max CPU fraction: {MAX_CPU_MEMORY_FRACTION})")
-    logger.performance(f"Loading data for {len(valid_symbols)} symbols using {max_workers} parallel workers")
-    
-    # Create main progress bar
-    main_pbar = _create_progress_bar(
-        total=len(valid_symbols), desc="Loading symbol data",
-        color=TQDM_COLORS['main'], unit='symbol'
+        pbar = _create_progress_bar(
+            total=len(symbols), desc="Loading all symbols data", color=TQDM_COLORS['main']
+        )
+        
+        for future in as_completed(future_to_symbol):
+            symbol = future_to_symbol[future]
+            try:
+                data = future.result()
+                all_data[symbol] = data
+                
+                is_success = (isinstance(data, pd.DataFrame) and not data.empty) or \
+                             (isinstance(data, dict) and data)
+
+                status_icon = '✅' if is_success else '❌'
+                if not is_success:
+                    failed_symbols.append(symbol)
+                    
+                pbar.set_postfix_str(f"{symbol} {status_icon}", refresh=True)
+
+            except Exception as exc:
+                logger.critical(f"{symbol} generated a critical exception: {exc}", exc_info=True)
+                all_data[symbol] = None
+                failed_symbols.append(symbol)
+            pbar.update(1)
+        pbar.close()
+
+    successful_count = len(symbols) - len(failed_symbols)
+    logger.success(
+        f"Data loading complete. "
+        f"Successful: {successful_count}/{len(symbols)}. "
+        f"Failed: {len(failed_symbols)}."
     )
     
-    # Execute parallel loading
-    dfs = {}
-    successful_loads = failed_loads = 0
-    
-    try:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_load_with_retry, symbol): symbol for symbol in valid_symbols}
-            
-            for future in as_completed(futures):
-                symbol = futures[future]
-                try:
-                    result = future.result()
-                    dfs[symbol] = result
-                    
-                    # Update counters and progress bar
-                    is_success = result is not None
-                    status_symbol = symbol if is_success else f"❌ {symbol}"
-                    successful_loads += int(is_success)
-                    failed_loads += int(not is_success)
-                    
-                    total_completed = successful_loads + failed_loads
-                    success_rate = successful_loads / total_completed * 100 if total_completed else 0
-                    
-                    main_pbar.set_postfix({
-                        'Success': successful_loads,
-                        'Failed': failed_loads,
-                        'Current': status_symbol,
-                        'Rate': f"{success_rate:.1f}%"
-                    })
-                    main_pbar.update(1)
-                    
-                    # Log progress periodically
-                    if total_completed % 5 == 0 or total_completed == len(valid_symbols):
-                        elapsed = time.time() - start_time
-                        logger.performance(f"Progress: {total_completed}/{len(valid_symbols)} symbols processed "
-                                        f"({success_rate:.1f}% success) in {elapsed:.1f}s")
-                        
-                except Exception as e:
-                    failed_loads += 1
-                    logger.error(f"Unexpected error handling {symbol}: {str(e)}")
-                    dfs[symbol] = None
-                    main_pbar.set_postfix({
-                        'Success': successful_loads,
-                        'Failed': failed_loads,
-                        'Current': f"💥 {symbol}",
-                        'Rate': f"{successful_loads/(successful_loads + failed_loads)*100:.1f}%"
-                    })
-                    main_pbar.update(1)
-                    
-    except Exception as e:
-        logger.error(f"Error in thread pool execution: {e}")
-        main_pbar.close()
-        return dfs
-    
-    main_pbar.close()
-    
-    # Log final statistics
-    elapsed_time = time.time() - start_time
-    success_rate = successful_loads / len(valid_symbols) * 100 if valid_symbols else 0
-    
-    logger.performance(f"Data loading complete: {successful_loads}/{len(valid_symbols)} symbols successfully loaded "
-                    f"({success_rate:.1f}% success rate) in {elapsed_time:.2f}s")
-    
-    # Calculate memory usage
-    total_memory_mb = _calculate_memory_usage(dfs)
-    logger.memory(f"Total data memory usage: {total_memory_mb:.2f} MB")
-    
-    # Detailed logging if in debug mode
-    if logger.level <= logging.DEBUG:
-        for symbol, df in dfs.items():
-            if df is not None:
-                if load_multi_timeframes and isinstance(df, dict):
-                    timeframe_info = []
-                    for tf, timeframe_df in df.items():
-                        if isinstance(timeframe_df, pd.DataFrame) and not timeframe_df.empty:
-                            # Handle different index types safely
-                            try:
-                                if hasattr(timeframe_df.index, 'strftime'):
-                                    time_range = f"{timeframe_df.index.min().strftime('%Y-%m-%d %H:%M')} to {timeframe_df.index.max().strftime('%Y-%m-%d %H:%M')}"
-                                elif pd.api.types.is_datetime64_any_dtype(timeframe_df.index):
-                                    time_range = f"{pd.to_datetime(timeframe_df.index.min()).strftime('%Y-%m-%d %H:%M')} to {pd.to_datetime(timeframe_df.index.max()).strftime('%Y-%m-%d %H:%M')}"
-                                else:
-                                    time_range = f"rows {timeframe_df.index.min()} to {timeframe_df.index.max()}"
-                            except (AttributeError, ValueError):
-                                time_range = f"rows {timeframe_df.index.min()} to {timeframe_df.index.max()}"
-                            
-                            timeframe_info.append(f"{tf} ({timeframe_df.shape[0]} bars, {time_range})")
-                    
-                    if timeframe_info:
-                        logger.data(f"{symbol} data loaded: " + "; ".join(timeframe_info))
-                elif isinstance(df, pd.DataFrame) and not df.empty:
-                    # Handle different index types safely
-                    try:
-                        if hasattr(df.index, 'strftime'):
-                            time_range = f"{df.index.min().strftime('%Y-%m-%d %H:%M')} to {df.index.max().strftime('%Y-%m-%d %H:%M')}"
-                        elif pd.api.types.is_datetime64_any_dtype(df.index):
-                            time_range = f"{pd.to_datetime(df.index.min()).strftime('%Y-%m-%d %H:%M')} to {pd.to_datetime(df.index.max()).strftime('%Y-%m-%d %H:%M')}"
-                        else:
-                            time_range = f"rows {df.index.min()} to {df.index.max()}"
-                    except (AttributeError, ValueError):
-                        time_range = f"rows {df.index.min()} to {df.index.max()}"
-                    
-                    logger.data(f"{symbol} data: {df.shape[0]} bars, {time_range}")
+    if failed_symbols:
+        logger.warning(f"Failed symbols: {', '.join(sorted(failed_symbols))}")
 
-    return dfs
+    total_memory = _calculate_memory_usage(all_data)
+    logger.memory(f"Total memory usage of loaded data: {total_memory:.2f} MB")
+    
+    return all_data

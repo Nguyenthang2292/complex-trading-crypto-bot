@@ -3,7 +3,7 @@ import pandas as pd
 import pandas_ta as ta
 import numpy as np
 import sys
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union, cast, Callable, Any
 
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -25,166 +25,233 @@ from components.config import (
     SMA_PERIOD
 )
 
+def _to_numpy_array(data: Union[np.ndarray, pd.Series, pd.DataFrame]) -> np.ndarray:
+    """Converts pandas objects to NumPy arrays safely.
+
+    Args:
+        data: The pandas Series, DataFrame, or NumPy array to convert.
+
+    Returns:
+        The data as a NumPy array.
+    """
+    if isinstance(data, np.ndarray):
+        return data
+    if hasattr(data, 'values'):
+        return cast(np.ndarray, data.values)
+    return np.array(data)
+
 def _calculate_rsi_vectorized(close_values: np.ndarray, period: int) -> np.ndarray:
-    """Calculate RSI using vectorized NumPy operations for maximum performance."""
-    deltas: np.ndarray = np.diff(close_values, prepend=close_values[0])
-    gains: np.ndarray = np.where(deltas > 0, deltas, 0)
-    losses: np.ndarray = np.where(deltas < 0, -deltas, 0)
+    """Calculates RSI using vectorized NumPy operations.
+
+    Args:
+        close_values: A NumPy array of closing prices.
+        period: The time period for RSI calculation.
+
+    Returns:
+        A NumPy array containing the RSI values.
+    """
+    deltas = np.diff(close_values, prepend=close_values[0])
+    gains = np.where(deltas > 0, deltas, 0)
+    losses = np.where(deltas < 0, -deltas, 0)
     
-    # Use pandas for rolling mean (optimized internally)
-    avg_gains: np.ndarray = pd.Series(gains).rolling(window=period, min_periods=1).mean().values
-    avg_losses: np.ndarray = pd.Series(losses).rolling(window=period, min_periods=1).mean().values
+    avg_gains = _to_numpy_array(pd.Series(gains).rolling(window=period, min_periods=1).mean())
+    avg_losses = _to_numpy_array(pd.Series(losses).rolling(window=period, min_periods=1).mean())
     
-    # Vectorized RSI calculation
-    rs: np.ndarray = np.divide(avg_gains, avg_losses, out=np.zeros_like(avg_gains), where=avg_losses!=0)
-    rsi: np.ndarray = 100 - (100 / (1 + rs))
-    
+    rs = np.divide(avg_gains, avg_losses, out=np.zeros_like(avg_gains), where=avg_losses != 0)
+    rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def _calculate_macd_vectorized(close_values: np.ndarray, fast_period: int, slow_period: int, signal_period: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Calculate MACD using vectorized operations with exponential smoothing."""
-    # Vectorized EMA calculation using pandas (optimized)
-    close_series: pd.Series = pd.Series(close_values)
-    ema_fast: np.ndarray = close_series.ewm(span=fast_period, adjust=False).mean().values
-    ema_slow: np.ndarray = close_series.ewm(span=slow_period, adjust=False).mean().values
+def _calculate_macd_vectorized(
+    close_values: np.ndarray, fast_period: int, slow_period: int, signal_period: int
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Calculates MACD using vectorized operations.
+
+    Args:
+        close_values: A NumPy array of closing prices.
+        fast_period: The fast period for MACD EMA.
+        slow_period: The slow period for MACD EMA.
+        signal_period: The signal line period for MACD.
+
+    Returns:
+        A tuple containing the MACD line and MACD signal line as NumPy arrays.
+    """
+    close_series = pd.Series(close_values)
+    ema_fast = _to_numpy_array(close_series.ewm(span=fast_period, adjust=False).mean())
+    ema_slow = _to_numpy_array(close_series.ewm(span=slow_period, adjust=False).mean())
     
-    # Vectorized MACD line calculation
-    macd_line: np.ndarray = ema_fast - ema_slow
-    
-    # Vectorized signal line calculation
-    macd_signal: np.ndarray = pd.Series(macd_line).ewm(span=signal_period, adjust=False).mean().values
-    
+    macd_line = ema_fast - ema_slow
+    macd_signal = _to_numpy_array(pd.Series(macd_line).ewm(span=signal_period, adjust=False).mean())
     return macd_line, macd_signal
 
-def _calculate_bollinger_bands_vectorized(close_values: np.ndarray, window: int, std_multiplier: float) -> Tuple[np.ndarray, np.ndarray]:
-    """Calculate Bollinger Bands using vectorized rolling operations."""
-    close_series: pd.Series = pd.Series(close_values)
+def _calculate_bollinger_bands_vectorized(
+    close_values: np.ndarray, window: int, std_multiplier: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Calculates Bollinger Bands using vectorized operations.
+
+    Args:
+        close_values: A NumPy array of closing prices.
+        window: The moving average window.
+        std_multiplier: The standard deviation multiplier.
+
+    Returns:
+        A tuple containing the upper and lower Bollinger Bands as NumPy arrays.
+    """
+    close_series = pd.Series(close_values)
     
-    # Vectorized rolling calculations
-    sma: np.ndarray = close_series.rolling(window=window, min_periods=1).mean().values
-    rolling_std: np.ndarray = close_series.rolling(window=window, min_periods=1).std().values
+    sma = _to_numpy_array(close_series.rolling(window=window, min_periods=1).mean())
+    rolling_std = _to_numpy_array(close_series.rolling(window=window, min_periods=1).std())
     
-    # Vectorized band calculations
-    bb_upper: np.ndarray = sma + (rolling_std * std_multiplier)
-    bb_lower: np.ndarray = sma - (rolling_std * std_multiplier)
-    
+    bb_upper = sma + (rolling_std * std_multiplier)
+    bb_lower = sma - (rolling_std * std_multiplier)
     return bb_upper, bb_lower
 
 def _calculate_sma_vectorized(close_values: np.ndarray, period: int) -> np.ndarray:
-    """Calculate Simple Moving Average using vectorized operations."""
-    return pd.Series(close_values).rolling(window=period, min_periods=1).mean().values
+    """Calculates Simple Moving Average using vectorized operations.
+
+    Args:
+        close_values: A NumPy array of closing prices.
+        period: The time period for the moving average.
+
+    Returns:
+        A NumPy array of the SMA values.
+    """
+    return _to_numpy_array(pd.Series(close_values).rolling(window=period, min_periods=1).mean())
+
+def _apply_indicator(
+    df: pd.DataFrame,
+    indicator_name: str,
+    ta_function: Callable[..., Optional[pd.DataFrame]],
+    fallback_function: Callable[..., Any],
+    close_values: np.ndarray,
+    params: dict,
+    output_cols: List[str]
+) -> None:
+    """
+    Applies a technical indicator calculation with a fallback mechanism.
+
+    Args:
+        df: The DataFrame to add the indicator to.
+        indicator_name: The name of the indicator for logging.
+        ta_function: The primary function from `pandas_ta` to call.
+        fallback_function: The vectorized numpy function to use as a fallback.
+        close_values: The numpy array of close prices.
+        params: A dictionary of parameters for the functions.
+        output_cols: A list of column names for the output.
+    """
+    try:
+        output = ta_function(df[COL_CLOSE], **params)
+        if output is not None and not output.empty:
+            if isinstance(output, pd.DataFrame) and len(output.columns) >= len(output_cols):
+                for i, col in enumerate(output_cols):
+                    # Find the correct column from pandas_ta output
+                    ta_col_name = next((c for c in output.columns if col.split('_')[0].upper() in c), None)
+                    if ta_col_name:
+                        df[col] = output[ta_col_name]
+                    else:
+                        raise ValueError(f"Could not find required column for {col} in {indicator_name} output.")
+            elif isinstance(output, pd.Series):
+                df[output_cols[0]] = output
+            else:
+                raise ValueError(f"Unexpected output type from {indicator_name}: {type(output)}")
+                
+            # If all values are NaN, try the fallback
+            if all(df[col].isna().all() for col in output_cols):
+                raise ValueError(f"{indicator_name} calculation resulted in all NaNs.")
+        else:
+            raise ValueError(f"{indicator_name} calculation returned None or empty.")
+    except Exception as e:
+        logger.warning(
+            f"{indicator_name} calculation failed with {type(e).__name__}: {e}. "
+            f"Using vectorized fallback."
+        )
+        try:
+            fallback_output = fallback_function(close_values, **params)
+            if isinstance(fallback_output, tuple):
+                for i, col in enumerate(output_cols):
+                    df[col] = fallback_output[i]
+            else:
+                df[output_cols[0]] = fallback_output
+        except Exception as fallback_e:
+            logger.error(
+                f"Vectorized fallback for {indicator_name} also failed: {fallback_e}",
+                exc_info=True
+            )
+            for col in output_cols:
+                df[col] = np.nan
 
 def generate_indicator_features(df_input: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculate technical indicators using vectorized NumPy operations for optimal performance.
-    
-    Computes RSI, MACD, Bollinger Bands, and SMA indicators using pandas_ta with NumPy
-    vectorized fallback calculations for maximum speed and reliability.
-    
+    """Calculates technical indicators and features for a given OHLCV DataFrame.
+
+    This function enriches the input DataFrame with several technical indicators,
+    including RSI, MACD, Bollinger Bands, and SMA. It uses the `pandas_ta` library
+    with a robust vectorized NumPy fallback for performance and reliability. It also
+    calculates the slope of the moving average and handles any resulting NaN values.
+
     Args:
-        df_input: DataFrame with OHLCV price data containing lowercase column names
-        
+        df_input: A pandas DataFrame containing at least a 'close' column with
+            OHLCV price data.
+
     Returns:
-        DataFrame with added technical indicators (rsi, macd, macd_signal, bb_upper, 
-        bb_lower, ma_20, ma_20_slope) or empty DataFrame on critical error
+        A pandas DataFrame with the added technical indicator columns. Returns an
+        empty DataFrame if the input is invalid or an unrecoverable error occurs.
     """
     try:
         if df_input.empty or COL_CLOSE not in df_input.columns:
-            logger.warning("Input DataFrame is empty or missing close column")
+            logger.warning("Input DataFrame is empty or missing 'close' column.")
             return pd.DataFrame()
-        
-        df: pd.DataFrame = df_input.copy()
-        close_values: np.ndarray = df[COL_CLOSE].values
-        
-        # Vectorized RSI calculation
-        try:
-            df['rsi'] = ta.rsi(df[COL_CLOSE], length=RSI_PERIOD)
-            if df['rsi'].isna().all():
-                df['rsi'] = _calculate_rsi_vectorized(close_values, RSI_PERIOD)
-        except Exception as e:
-            logger.warning(f"RSI calculation failed: {e}. Using vectorized calculation.")
-            df['rsi'] = _calculate_rsi_vectorized(close_values, RSI_PERIOD)
-            
-        # Vectorized MACD calculation
-        try:
-            macd_output: Optional[pd.DataFrame] = ta.macd(
-                df[COL_CLOSE], fast=MACD_FAST_PERIOD, slow=MACD_SLOW_PERIOD, signal=MACD_SIGNAL_PERIOD
-            )
-            if macd_output is not None and len(macd_output.columns) >= 2:
-                df['macd'] = macd_output.iloc[:, 0]
-                df['macd_signal'] = macd_output.iloc[:, 1]
-            else:
-                macd_line, macd_signal = _calculate_macd_vectorized(
-                    close_values, MACD_FAST_PERIOD, MACD_SLOW_PERIOD, MACD_SIGNAL_PERIOD
-                )
-                df['macd'] = macd_line
-                df['macd_signal'] = macd_signal
-        except Exception as e:
-            logger.warning(f"MACD calculation failed: {e}. Using vectorized calculation.")
-            macd_line, macd_signal = _calculate_macd_vectorized(
-                close_values, MACD_FAST_PERIOD, MACD_SLOW_PERIOD, MACD_SIGNAL_PERIOD
-            )
-            df['macd'] = macd_line
-            df['macd_signal'] = macd_signal
-            
-        # Vectorized Bollinger Bands calculation
-        try:
-            bb: Optional[pd.DataFrame] = ta.bbands(df[COL_CLOSE], length=BB_WINDOW, std=BB_STD_MULTIPLIER)
-            if bb is not None and not bb.empty:
-                bb_cols: List[str] = bb.columns.tolist()
-                upper_col: List[str] = [col for col in bb_cols if 'BBU' in col]
-                lower_col: List[str] = [col for col in bb_cols if 'BBL' in col]
-                
-                if upper_col and lower_col:
-                    df[COL_BB_UPPER] = bb[upper_col[0]]
-                    df[COL_BB_LOWER] = bb[lower_col[0]]
-                else:
-                    bb_upper, bb_lower = _calculate_bollinger_bands_vectorized(
-                        close_values, BB_WINDOW, BB_STD_MULTIPLIER
-                    )
-                    df[COL_BB_UPPER] = bb_upper
-                    df[COL_BB_LOWER] = bb_lower
-            else:
-                bb_upper, bb_lower = _calculate_bollinger_bands_vectorized(
-                    close_values, BB_WINDOW, BB_STD_MULTIPLIER
-                )
-                df[COL_BB_UPPER] = bb_upper
-                df[COL_BB_LOWER] = bb_lower
-        except Exception as e:
-            logger.warning(f"Bollinger Bands calculation failed: {e}. Using vectorized calculation.")
-            bb_upper, bb_lower = _calculate_bollinger_bands_vectorized(
-                close_values, BB_WINDOW, BB_STD_MULTIPLIER
-            )
-            df[COL_BB_UPPER] = bb_upper
-            df[COL_BB_LOWER] = bb_lower
-            
-        # Vectorized SMA calculation
-        try:
-            df['ma_20'] = ta.sma(df[COL_CLOSE], length=SMA_PERIOD)
-            if df['ma_20'].isna().all():
-                df['ma_20'] = _calculate_sma_vectorized(close_values, SMA_PERIOD)
-        except Exception as e:
-            logger.warning(f"SMA calculation failed: {e}. Using vectorized calculation.")
-            df['ma_20'] = _calculate_sma_vectorized(close_values, SMA_PERIOD)
 
-        # Vectorized slope calculation
-        df['ma_20_slope'] = np.gradient(df['ma_20'].ffill().values)
+        df = df_input.copy()
+        close_values = _to_numpy_array(df[COL_CLOSE])
 
-        # Optimized NaN handling
-        numeric_columns: List[str] = ['rsi', 'macd', 'macd_signal', COL_BB_UPPER, COL_BB_LOWER, 'ma_20', 'ma_20_slope']
-        for col in numeric_columns:
+        # RSI
+        _apply_indicator(
+            df, 'RSI', ta.rsi, _calculate_rsi_vectorized, close_values,
+            {'length': RSI_PERIOD}, ['rsi']
+        )
+
+        # MACD
+        _apply_indicator(
+            df, 'MACD', ta.macd, _calculate_macd_vectorized, close_values,
+            {'fast': MACD_FAST_PERIOD, 'slow': MACD_SLOW_PERIOD, 'signal': MACD_SIGNAL_PERIOD},
+            ['macd', 'macd_signal']
+        )
+
+        # Bollinger Bands
+        _apply_indicator(
+            df, 'Bollinger Bands', ta.bbands, _calculate_bollinger_bands_vectorized, close_values,
+            {'length': BB_WINDOW, 'std': BB_STD_MULTIPLIER},
+            [COL_BB_UPPER, COL_BB_LOWER]
+        )
+
+        # SMA
+        _apply_indicator(
+            df, 'SMA', ta.sma, _calculate_sma_vectorized, close_values,
+            {'length': SMA_PERIOD}, ['ma_20']
+        )
+
+        # Calculate slope for the 'ma_20'
+        if 'ma_20' in df.columns:
+            ma_20_values = _to_numpy_array(df['ma_20'].ffill())
+            df['ma_20_slope'] = np.gradient(ma_20_values)
+
+        # Fill NaN values and drop rows if any NaNs still exist
+        numeric_cols = [
+            'rsi', 'macd', 'macd_signal', COL_BB_UPPER, COL_BB_LOWER, 
+            'ma_20', 'ma_20_slope'
+        ]
+        for col in numeric_cols:
             if col in df.columns:
                 df[col] = df[col].bfill().ffill()
-        
-        result_df: pd.DataFrame = df.dropna()
-        if result_df.empty:
-            logger.warning("All features resulted in NaN - insufficient data for technical indicators")
+
+        result_df = df.dropna()
+        if result_df.empty and not df.empty:
+            logger.warning("DataFrame became empty after dropping NaNs from feature generation.")
         else:
-            logger.info(f"Technical indicators calculated successfully for {len(result_df)} rows")
-    
+            logger.success(f"Generated features for {len(result_df)} rows.")
+            
         return result_df
-        
+
     except Exception as e:
-        logger.error(f"Error in feature calculation: {e}")
+        logger.error(f"Critical error in generate_indicator_features: {e}", exc_info=True)
         return pd.DataFrame()
 

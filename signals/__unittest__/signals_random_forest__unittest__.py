@@ -3,7 +3,10 @@ import pandas as pd
 import numpy as np
 import sys
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
+from pathlib import Path
+import tempfile
+import shutil
 
 # Add the parent directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -13,13 +16,23 @@ from signals.signals_random_forest import (
     train_random_forest_model,
     get_latest_random_forest_signal,
     train_and_save_global_rf_model,
+    load_random_forest_model,
+    evaluate_model_with_confidence,
+    apply_confidence_threshold,
+    calculate_and_display_metrics,
 )
 
 from components.config import (
     COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE,
     COL_BB_UPPER, COL_BB_LOWER,
     SIGNAL_LONG, SIGNAL_SHORT, SIGNAL_NEUTRAL,
-    MAX_TRAINING_ROWS)
+    MAX_TRAINING_ROWS, MODEL_FEATURES, CONFIDENCE_THRESHOLD,
+    CONFIDENCE_THRESHOLDS, MIN_MEMORY_GB, MIN_TRAINING_SAMPLES,
+    BUY_THRESHOLD, SELL_THRESHOLD, RSI_PERIOD, MACD_FAST_PERIOD,
+    MACD_SLOW_PERIOD, MACD_SIGNAL_PERIOD, SMA_PERIOD, DEFAULT_WINDOW_SIZE,
+    BB_STD_MULTIPLIER, MODEL_RANDOM_STATE, MODEL_TEST_SIZE, MIN_DATA_POINTS,
+    MODELS_DIR, RANDOM_FOREST_MODEL_FILENAME
+)
 
 class TestSignalRandomForest(unittest.TestCase):
     """Test cases for signals_random_forest module"""
@@ -76,6 +89,45 @@ class TestSignalRandomForest(unittest.TestCase):
             COL_LOW: large_close - np.random.uniform(0, 2, self.large_dataset_size),
             COL_CLOSE: large_close
         })
+
+        # Create DataFrame with single class for testing class imbalance
+        self.single_class_df = pd.DataFrame({
+            COL_OPEN: [100] * 50,
+            COL_HIGH: [105] * 50,
+            COL_LOW: [95] * 50,
+            COL_CLOSE: [100] * 50
+        })
+
+        # Create DataFrame with insufficient samples
+        self.insufficient_df = pd.DataFrame({
+            COL_OPEN: [100, 101, 102],
+            COL_HIGH: [105, 106, 107],
+            COL_LOW: [95, 96, 97],
+            COL_CLOSE: [100, 101, 102]
+        })
+
+        # Create test data for evaluation functions
+        self.test_y_true = np.array([-1, 0, 1, -1, 0, 1, 0, 1, -1, 0])
+        self.test_y_pred = np.array([-1, 0, 1, 0, 0, 1, 0, 1, -1, 0])
+        self.test_y_proba = np.array([
+            [0.8, 0.1, 0.1],  # High confidence for -1
+            [0.1, 0.8, 0.1],  # High confidence for 0
+            [0.1, 0.1, 0.8],  # High confidence for 1
+            [0.4, 0.5, 0.1],  # Low confidence
+            [0.1, 0.8, 0.1],  # High confidence for 0
+            [0.1, 0.1, 0.8],  # High confidence for 1
+            [0.1, 0.8, 0.1],  # High confidence for 0
+            [0.1, 0.1, 0.8],  # High confidence for 1
+            [0.8, 0.1, 0.1],  # High confidence for -1
+            [0.1, 0.8, 0.1]   # High confidence for 0
+        ])
+        self.test_classes = np.array([-1, 0, 1])
+
+        # Create temporary directory for model testing
+        self.temp_dir = tempfile.mkdtemp()
+        self.original_models_dir = MODELS_DIR
+        self.test_models_dir = Path(self.temp_dir) / "models"
+        self.test_models_dir.mkdir(exist_ok=True)
 
     def test_calculate_features_success(self):
         """Test successful feature calculation"""
@@ -272,6 +324,288 @@ class TestSignalRandomForest(unittest.TestCase):
             self.assertIsNotNone(result)
 
     @patch('signals.signals_random_forest.psutil.virtual_memory')
+    @patch('signals.signals_random_forest.joblib.dump')
+    def test_train_and_save_global_rf_model_success(self, mock_dump, mock_memory):
+        """Test successful global model training and saving"""
+        # Mock sufficient memory
+        mock_memory.return_value.available = 4 * 1024**3  # 4GB
+        
+        model, model_path = train_and_save_global_rf_model(self.training_df)
+        
+        if model is not None:
+            self.assertIsNotNone(model)
+            self.assertIsInstance(model_path, str)
+            self.assertTrue(mock_dump.called)
+
+    def test_train_and_save_global_rf_model_empty_input(self):
+        """Test global model training with empty DataFrame"""
+        model, model_path = train_and_save_global_rf_model(self.empty_df)
+        self.assertIsNone(model)
+        self.assertEqual(model_path, "")
+
+    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
+    def test_train_and_save_global_rf_model_custom_filename(self):
+        """Test global model training with custom filename"""
+        custom_filename = "custom_rf_model.joblib"
+        
+        with patch('signals.signals_random_forest.psutil.virtual_memory') as mock_memory:
+            mock_memory.return_value.available = 4 * 1024**3  # 4GB
+            with patch('signals.signals_random_forest.joblib.dump') as mock_dump:
+                model, model_path = train_and_save_global_rf_model(self.training_df, custom_filename)
+                
+                if model is not None:
+                    self.assertIn(custom_filename, model_path)
+
+    @patch('signals.signals_random_forest.psutil.virtual_memory')
+    @patch('signals.signals_random_forest.joblib.dump')
+    def test_train_and_save_global_rf_model_save_error(self, mock_dump, mock_memory):
+        """Test global model training when saving fails"""
+        # Mock sufficient memory
+        mock_memory.return_value.available = 4 * 1024**3  # 4GB
+        mock_dump.side_effect = Exception("Save failed")
+        
+        model, model_path = train_and_save_global_rf_model(self.training_df)
+        self.assertIsNone(model)
+        self.assertEqual(model_path, "")
+
+    @patch('signals.signals_random_forest.psutil.virtual_memory')
+    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
+    def test_train_and_save_global_rf_model_training_failure(self, mock_memory):
+        """Test global model training when model training fails"""
+        # Mock sufficient memory
+        mock_memory.return_value.available = 4 * 1024**3  # 4GB
+        
+        # Use insufficient data to cause training failure
+        model, model_path = train_and_save_global_rf_model(self.insufficient_df)
+        self.assertIsNone(model)
+        self.assertEqual(model_path, "")
+
+    @patch('signals.signals_random_forest.psutil.virtual_memory')
+    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
+    def test_train_and_save_global_rf_model_timestamped_filename(self, mock_memory):
+        """Test global model training with auto-generated timestamped filename"""
+        # Mock sufficient memory
+        mock_memory.return_value.available = 4 * 1024**3  # 4GB
+        
+        with patch('signals.signals_random_forest.joblib.dump') as mock_dump:
+            with patch('signals.signals_random_forest.datetime') as mock_datetime:
+                mock_datetime.now.return_value.strftime.return_value = "20231201_1430"
+                
+                model, model_path = train_and_save_global_rf_model(self.training_df)
+                
+                if model is not None:
+                    self.assertIn("rf_model_20231201_1430.joblib", model_path)
+
+    # Additional edge case tests
+    @patch('signals.signals_random_forest.psutil.virtual_memory')
+    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
+    def test_train_random_forest_model_single_class_data(self, mock_memory):
+        """Test model training with single class data"""
+        # Mock sufficient memory
+        mock_memory.return_value.available = 4 * 1024**3  # 4GB
+        
+        result = train_random_forest_model(self.single_class_df, save_model=False)
+        self.assertIsNone(result)
+
+    @patch('signals.signals_random_forest.psutil.virtual_memory')
+    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
+    def test_train_random_forest_model_insufficient_samples(self, mock_memory):
+        """Test model training with insufficient samples"""
+        # Mock sufficient memory
+        mock_memory.return_value.available = 4 * 1024**3  # 4GB
+        
+        result = train_random_forest_model(self.insufficient_df, save_model=False)
+        self.assertIsNone(result)
+
+    @patch('signals.signals_random_forest.psutil.virtual_memory')
+    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
+    def test_train_random_forest_model_none_input(self, mock_memory):
+        """Test model training with None input"""
+        # Mock sufficient memory
+        mock_memory.return_value.available = 4 * 1024**3  # 4GB
+        
+        result = train_random_forest_model(None, save_model=False)  # type: ignore
+        self.assertIsNone(result)
+
+    def test_calculate_features_with_nan_values(self):
+        """Test feature calculation with NaN values in input"""
+        df_with_nan = self.sample_df.copy()
+        df_with_nan.loc[10:15, COL_CLOSE] = np.nan
+        
+        result = _calculate_features(df_with_nan)
+        
+        # Should handle NaN values and still return a DataFrame
+        # The exact behavior depends on how pandas_ta handles NaN values
+        self.assertIsInstance(result, pd.DataFrame)
+
+    def test_calculate_features_with_constant_prices(self):
+        """Test feature calculation with constant prices"""
+        constant_df = pd.DataFrame({
+            COL_OPEN: [100] * 50,
+            COL_HIGH: [100] * 50,
+            COL_LOW: [100] * 50,
+            COL_CLOSE: [100] * 50
+        })
+        
+        result = _calculate_features(constant_df)
+        
+        # Should handle constant prices without crashing
+        self.assertIsInstance(result, pd.DataFrame)
+
+    # Tests for load_random_forest_model function
+    def test_load_random_forest_model_success(self):
+        """Test successful model loading"""
+        mock_model = MagicMock()
+        mock_model_path = self.test_models_dir / "test_model.joblib"
+        
+        with patch('signals.signals_random_forest.joblib.load', return_value=mock_model) as mock_load:
+            with patch('signals.signals_random_forest.Path.exists', return_value=True):
+                result = load_random_forest_model(mock_model_path)
+                
+                self.assertIsNotNone(result)
+                self.assertEqual(result, mock_model)
+                mock_load.assert_called_once_with(mock_model_path)
+
+    def test_load_random_forest_model_file_not_found(self):
+        """Test model loading when file doesn't exist"""
+        mock_model_path = self.test_models_dir / "nonexistent_model.joblib"
+        
+        with patch('signals.signals_random_forest.Path.exists', return_value=False):
+            result = load_random_forest_model(mock_model_path)
+            
+            self.assertIsNone(result)
+
+    def test_load_random_forest_model_load_error(self):
+        """Test model loading when joblib.load raises an exception"""
+        mock_model_path = self.test_models_dir / "test_model.joblib"
+        
+        with patch('signals.signals_random_forest.joblib.load', side_effect=Exception("Load error")):
+            with patch('signals.signals_random_forest.Path.exists', return_value=True):
+                result = load_random_forest_model(mock_model_path)
+                
+                self.assertIsNone(result)
+
+    def test_load_random_forest_model_default_path(self):
+        """Test model loading with default path"""
+        mock_model = MagicMock()
+        
+        with patch('signals.signals_random_forest.joblib.load', return_value=mock_model) as mock_load:
+            with patch('signals.signals_random_forest.Path.exists', return_value=True):
+                result = load_random_forest_model()
+                
+                self.assertIsNotNone(result)
+                self.assertEqual(result, mock_model)
+                # Should use default path
+                expected_path = MODELS_DIR / RANDOM_FOREST_MODEL_FILENAME
+                mock_load.assert_called_once_with(expected_path)
+
+    # Tests for evaluation functions
+    def test_apply_confidence_threshold_high_confidence(self):
+        """Test confidence threshold application with high confidence predictions"""
+        threshold = 0.7
+        result = apply_confidence_threshold(self.test_y_proba, threshold, self.test_classes)
+        
+        # Should return predictions for high confidence cases, 0 for low confidence
+        expected = np.array([-1, 0, 1, 0, 0, 1, 0, 1, -1, 0])
+        np.testing.assert_array_equal(result, expected)
+
+    def test_apply_confidence_threshold_low_threshold(self):
+        """Test confidence threshold application with low threshold"""
+        threshold = 0.3
+        result = apply_confidence_threshold(self.test_y_proba, threshold, self.test_classes)
+        
+        # Should return predictions for all cases since confidence is above threshold
+        expected = np.array([-1, 0, 1, 0, 0, 1, 0, 1, -1, 0])
+        np.testing.assert_array_equal(result, expected)
+
+    def test_apply_confidence_threshold_high_threshold(self):
+        """Test confidence threshold application with very high threshold"""
+        threshold = 0.9
+        result = apply_confidence_threshold(self.test_y_proba, threshold, self.test_classes)
+        
+        # Should return 0 for most cases since confidence is below threshold
+        expected = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        np.testing.assert_array_equal(result, expected)
+
+    def test_apply_confidence_threshold_edge_cases(self):
+        """Test confidence threshold application with edge cases"""
+        # Test with single prediction
+        single_proba = np.array([[0.1, 0.8, 0.1]])
+        result = apply_confidence_threshold(single_proba, 0.7, self.test_classes)
+        self.assertEqual(result[0], 0)  # Should return 0 for low confidence
+        
+        # Test with exact threshold
+        result = apply_confidence_threshold(single_proba, 0.8, self.test_classes)
+        self.assertEqual(result[0], 0)  # Should return class 0 for exact confidence
+
+    @patch('signals.signals_random_forest.logger.performance')
+    def test_calculate_and_display_metrics_success(self, mock_logger):
+        """Test metrics calculation and display"""
+        threshold = 0.7
+        calculate_and_display_metrics(self.test_y_true, self.test_y_pred, threshold)
+        
+        # Should call logger.performance multiple times
+        self.assertGreater(mock_logger.call_count, 0)
+
+    @patch('signals.signals_random_forest.logger.performance')
+    def test_calculate_and_display_metrics_with_different_signals(self, mock_logger):
+        """Test metrics calculation with different signal distributions"""
+        y_true = np.array([1, 1, 1, 0, 0, 0, -1, -1, -1])
+        y_pred = np.array([1, 0, 1, 0, 0, 1, -1, 0, -1])
+        threshold = 0.5
+        
+        calculate_and_display_metrics(y_true, y_pred, threshold)
+        
+        # Should handle different signal types
+        self.assertGreater(mock_logger.call_count, 0)
+
+    @patch('signals.signals_random_forest.logger.performance')
+    def test_calculate_and_display_metrics_empty_arrays(self, mock_logger):
+        """Test metrics calculation with empty arrays"""
+        y_true = np.array([])
+        y_pred = np.array([])
+        threshold = 0.5
+        
+        # Should handle empty arrays gracefully
+        calculate_and_display_metrics(y_true, y_pred, threshold)
+        
+        # Should still call logger (though metrics might be NaN)
+        self.assertGreater(mock_logger.call_count, 0)
+
+    @patch('signals.signals_random_forest.logger.performance')
+    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
+    def test_evaluate_model_with_confidence_success(self, mock_logger):
+        """Test model evaluation with confidence thresholds"""
+        mock_model = MagicMock()
+        mock_model.predict_proba.return_value = self.test_y_proba
+        mock_model.classes_ = self.test_classes
+        
+        X_test = pd.DataFrame(np.random.randn(10, 6), columns=pd.Index(['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20']))
+        y_test = pd.Series(self.test_y_true)
+        
+        evaluate_model_with_confidence(mock_model, X_test, y_test)
+        
+        # Should call logger for each confidence threshold
+        expected_calls = len(CONFIDENCE_THRESHOLDS)
+        self.assertGreaterEqual(mock_logger.call_count, expected_calls)
+
+    @patch('signals.signals_random_forest.logger.performance')
+    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
+    def test_evaluate_model_with_confidence_prediction_error(self, mock_logger):
+        """Test model evaluation when predict_proba fails"""
+        mock_model = MagicMock()
+        mock_model.predict_proba.side_effect = Exception("Prediction error")
+        mock_model.classes_ = self.test_classes
+        
+        X_test = pd.DataFrame(np.random.randn(10, 6), columns=pd.Index(['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20']))
+        y_test = pd.Series(self.test_y_true)
+        
+        # Should handle prediction errors gracefully
+        with self.assertRaises(Exception):
+            evaluate_model_with_confidence(mock_model, X_test, y_test)
+
+    # Tests for get_latest_random_forest_signal function
+    @patch('signals.signals_random_forest.psutil.virtual_memory')
     @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
     def test_get_latest_random_forest_signal_success(self, mock_memory):
         """Test successful signal generation"""
@@ -427,80 +761,13 @@ class TestSignalRandomForest(unittest.TestCase):
             signal = get_latest_random_forest_signal(self.sample_df, mock_model)
             self.assertEqual(signal, SIGNAL_NEUTRAL)
 
-    @patch('signals.signals_random_forest.psutil.virtual_memory')
-    @patch('signals.signals_random_forest.joblib.dump')
-    def test_train_and_save_global_rf_model_success(self, mock_dump, mock_memory):
-        """Test successful global model training and saving"""
-        # Mock sufficient memory
-        mock_memory.return_value.available = 4 * 1024**3  # 4GB
-        
-        model, model_path = train_and_save_global_rf_model(self.training_df)
-        
-        if model is not None:
-            self.assertIsNotNone(model)
-            self.assertIsInstance(model_path, str)
-            self.assertTrue(mock_dump.called)
-
-    def test_train_and_save_global_rf_model_empty_input(self):
-        """Test global model training with empty DataFrame"""
-        model, model_path = train_and_save_global_rf_model(self.empty_df)
-        self.assertIsNone(model)
-        self.assertEqual(model_path, "")
-
-    @patch('signals.signals_random_forest.MODEL_FEATURES', ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'ma_20'])
-    def test_train_and_save_global_rf_model_custom_filename(self):
-        """Test global model training with custom filename"""
-        custom_filename = "custom_rf_model.joblib"
-        
-        with patch('signals.signals_random_forest.psutil.virtual_memory') as mock_memory:
-            mock_memory.return_value.available = 4 * 1024**3  # 4GB
-            with patch('signals.signals_random_forest.joblib.dump') as mock_dump:
-                model, model_path = train_and_save_global_rf_model(self.training_df, custom_filename)
-                
-                if model is not None:
-                    self.assertIn(custom_filename, model_path)
-
-    @patch('signals.signals_random_forest.psutil.virtual_memory')
-    @patch('signals.signals_random_forest.joblib.dump')
-    def test_train_and_save_global_rf_model_save_error(self, mock_dump, mock_memory):
-        """Test global model training when saving fails"""
-        # Mock sufficient memory
-        mock_memory.return_value.available = 4 * 1024**3  # 4GB
-        mock_dump.side_effect = Exception("Save failed")
-        
-        model, model_path = train_and_save_global_rf_model(self.training_df)
-        self.assertIsNone(model)
-        self.assertEqual(model_path, "")
-
-    def test_calculate_features_with_nan_values(self):
-        """Test feature calculation with NaN values in input"""
-        df_with_nan = self.sample_df.copy()
-        df_with_nan.loc[10:15, COL_CLOSE] = np.nan
-        
-        result = _calculate_features(df_with_nan)
-        
-        # Should handle NaN values and still return a DataFrame
-        # The exact behavior depends on how pandas_ta handles NaN values
-        self.assertIsInstance(result, pd.DataFrame)
-
-    def test_calculate_features_with_constant_prices(self):
-        """Test feature calculation with constant prices"""
-        constant_df = pd.DataFrame({
-            COL_OPEN: [100] * 50,
-            COL_HIGH: [100] * 50,
-            COL_LOW: [100] * 50,
-            COL_CLOSE: [100] * 50
-        })
-        
-        result = _calculate_features(constant_df)
-        
-        # Should handle constant prices without crashing
-        self.assertIsInstance(result, pd.DataFrame)
-
     def tearDown(self):
         """Clean up after each test"""
-        # Clean up any temporary files or resources if needed
-        pass
+        # Clean up temporary directory
+        try:
+            shutil.rmtree(self.temp_dir)
+        except (OSError, FileNotFoundError):
+            pass
 
 if __name__ == '__main__':
     # Configure test runner

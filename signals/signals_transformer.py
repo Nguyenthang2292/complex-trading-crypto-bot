@@ -1,3 +1,33 @@
+# ====================================================================
+# TRANSFORMER MODEL FOR CRYPTO TRADING SIGNALS
+# ====================================================================
+
+"""
+Transformer-based time series forecasting model for cryptocurrency trading signals.
+
+This module implements a transformer architecture optimized for time series 
+forecasting in cryptocurrency trading. The model uses self-attention mechanisms
+to capture complex temporal patterns and generate trading signals.
+
+Key Features:
+- Self-attention mechanism for temporal pattern recognition
+- Positional encodings for sequence order awareness  
+- GPU acceleration with Tensor Core optimization
+- Mixed precision training for faster convergence
+- Comprehensive bias detection and threshold optimization
+- Safe model saving/loading with PyTorch 2.6+ compatibility
+
+Usage:
+    # Train a transformer model
+    model, path = train_and_save_transformer_model(df_market_data)
+    
+    # Load a trained model
+    model, scaler, features, target_idx = load_transformer_model("path/to/model.pth")
+    
+    # Generate trading signal
+    signal = get_latest_transformer_signal(df_new_data, model, scaler, features, target_idx)
+"""
+
 import logging
 import numpy as np
 import os
@@ -7,29 +37,136 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, Dataset
-from torch.amp import autocast, GradScaler
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+from pathlib import Path
+
+# Import autocast and GradScaler with version compatibility
+try:
+    from torch.amp.autocast_mode import autocast
+    from torch.amp.grad_scaler import GradScaler
+except ImportError:
+    try:
+        from torch.cuda.amp import autocast, GradScaler
+    except ImportError:
+        print("Warning: AMP not available in this PyTorch version")
+        autocast = None
+        GradScaler = None
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utilities._logger import setup_logging
-from utilities._gpu_resource_manager import get_gpu_resource_manager, check_gpu_availability, get_tensor_core_info
+from utilities._gpu_resource_manager import get_gpu_resource_manager, check_gpu_availability
 logger = setup_logging(module_name="signals_transformer", log_level=logging.DEBUG)
 
 from components._generate_indicator_features import generate_indicator_features
 from components.config import (
-    BUY_THRESHOLD,
-    COL_CLOSE, CPU_MODEL_CONFIG,
-    DEFAULT_EPOCHS,
-    FUTURE_RETURN_SHIFT,
-    GPU_MODEL_CONFIG,
-    MIN_DATA_POINTS, MODEL_FEATURES, MODELS_DIR,
-    SELL_THRESHOLD, SIGNAL_LONG, SIGNAL_NEUTRAL, SIGNAL_SHORT,
-    TRANSFORMER_MODEL_FILENAME
+    BUY_THRESHOLD, COL_CLOSE, CPU_MODEL_CONFIG, DEFAULT_EPOCHS,
+    FUTURE_RETURN_SHIFT, GPU_MODEL_CONFIG, MIN_DATA_POINTS, 
+    MODEL_FEATURES, MODELS_DIR, SELL_THRESHOLD, SIGNAL_LONG, 
+    SIGNAL_NEUTRAL, SIGNAL_SHORT, TRANSFORMER_MODEL_FILENAME
 )
 
 # Check GPU availability
 gpu_available: bool = check_gpu_availability()
+
+def setup_safe_globals():
+    """Setup safe globals for PyTorch serialization to handle numpy compatibility."""
+    try:
+        import numpy as np
+        safe_globals_list = [np.ndarray, np.dtype]
+        
+        if hasattr(torch.serialization, 'add_safe_globals'):
+            try:
+                torch.serialization.add_safe_globals(safe_globals_list)
+                logger.debug("Safe globals configured for PyTorch serialization")
+            except Exception as e:
+                logger.warning(f"Error setting up safe globals: {e}")
+        else:
+            logger.debug("PyTorch version does not support add_safe_globals")
+            
+    except Exception as e:
+        logger.debug(f"Could not setup safe globals: {e}")
+
+# Initialize safe globals
+setup_safe_globals()
+
+def safe_memory_division(value: Union[int, str, float], divisor: int) -> float:
+    """Safely divide memory values, handling different types."""
+    if isinstance(value, (int, float)):
+        return float(value) / divisor
+    elif isinstance(value, str):
+        try:
+            return float(value) / divisor
+        except (ValueError, TypeError):
+            return 0.0
+    return 0.0
+
+def safe_memory_comparison(value: Union[int, str, float], threshold: int) -> bool:
+    """Safely compare memory values, handling different types."""
+    if isinstance(value, (int, float)):
+        return float(value) > threshold
+    elif isinstance(value, str):
+        try:
+            return float(value) > threshold
+        except (ValueError, TypeError):
+            return False
+    return False
+
+def safe_nan_to_num(features: np.ndarray) -> np.ndarray:
+    """Safely handle nan_to_num with proper type checking."""
+    try:
+        if isinstance(features, np.ndarray):
+            return np.nan_to_num(features, nan=0.0, posinf=1e6, neginf=-1e6)
+        else:
+            features_array = np.array(features)
+            return np.nan_to_num(features_array, nan=0.0, posinf=1e6, neginf=-1e6)
+    except Exception as e:
+        logger.warning(f"Error in nan_to_num: {e}, using fallback")
+        return np.zeros_like(features) if hasattr(features, 'shape') else np.array([])
+
+def safe_save_model(checkpoint: Dict[str, Any], model_path: str) -> bool:
+    """Safely save PyTorch model with compatibility for PyTorch 2.6+."""
+    try:
+        Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+        torch.save(checkpoint, model_path, pickle_protocol=4)
+        logger.debug(f"Model saved successfully to {model_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save model to {model_path}: {e}")
+        return False
+
+def safe_load_model(model_path: str) -> Optional[Dict[str, Any]]:
+    """Safely load PyTorch model with fallback strategies for PyTorch 2.6+ compatibility."""
+    try:
+        checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+        logger.debug("Model loaded with weights_only=False")
+        return checkpoint
+    except Exception as e:
+        logger.warning(f"Loading with weights_only=False failed: {e}")
+    try:
+        import numpy as np
+        try:
+            with torch.serialization.safe_globals([np.ndarray, np.dtype]):
+                checkpoint = torch.load(model_path, map_location='cpu', weights_only=True)
+                logger.debug("Model loaded with safe globals context manager")
+                return checkpoint
+        except (AttributeError, ImportError):
+            if hasattr(torch.serialization, 'add_safe_globals'):
+                torch.serialization.add_safe_globals([np.ndarray, np.dtype])
+                checkpoint = torch.load(model_path, map_location='cpu', weights_only=True)
+                logger.debug("Model loaded with add_safe_globals")
+                return checkpoint
+            else:
+                raise ValueError("Neither safe_globals nor add_safe_globals available")
+    except Exception as e:
+        logger.warning(f"Loading with safe_globals approach failed: {e}")
+    try:
+        checkpoint = torch.load(model_path, map_location='cpu')
+        logger.debug("Model loaded with legacy method")
+        return checkpoint
+    except Exception as e:
+        logger.error(f"All loading methods failed: {e}")
+        return None
 
 def select_and_scale_features(
     df: pd.DataFrame, 
@@ -69,54 +206,39 @@ def select_and_scale_features(
     except Exception as e:
         logger.error(f"Error in scaling: {e}")
         raise
-
+    
 class CryptoDataset(Dataset):
-    """Dataset for time series prediction with transformer models.
+    """Dataset for preprocessed time series sequences."""
     
-    Implements sliding window approach for sequence generation from time series data.
-    Supports both single-step and multi-step prediction targets.
-
-    Attributes:
-        data: Input time series data
-        seq_length: Length of input sequences
-        pred_length: Number of future steps to predict
-        feature_dim: Number of features in data
-        target_column_idx: Index of target feature column
-    """
+    def __init__(self, X: np.ndarray, y: np.ndarray) -> None:
+        """Initialize with preprocessed sequences and targets.
+        
+        Args:
+            X: Preprocessed input sequences of shape (num_samples, seq_length, num_features)
+            y: Preprocessed targets of shape (num_samples, prediction_length)
+        """
+        self.X = X
+        self.y = y
     
-    def __init__(
-        self, 
-        data: np.ndarray,
-        seq_length: int = 60,
-        prediction_length: int = 1,
-        feature_dim: int = 4,
-        target_column_idx: int = 3
-    ) -> None:
-        self.data = data
-        self.seq_length = seq_length
-        self.pred_length = prediction_length
-        self.feature_dim = feature_dim
-        self.target_column_idx = target_column_idx
-
     def __len__(self) -> int:
-        return len(self.data) - self.seq_length - self.pred_length + 1
-
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        x = self.data[idx : idx + self.seq_length]
-        y = self.data[idx + self.seq_length : idx + self.seq_length + self.pred_length, self.target_column_idx]
-        return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
+        return len(self.X)
     
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get a preprocessed sequence-target pair.
+        
+        Args:
+            idx: Index of the sample
+            
+        Returns:
+            Tuple of (input_sequence, target_values)
+        """
+        return torch.tensor(self.X[idx], dtype=torch.float32), torch.tensor(self.y[idx], dtype=torch.float32)
+
 class TimeSeriesTransformer(nn.Module):
     """Transformer model for time series forecasting with self-attention mechanism.
     
     Implements a transformer-based architecture optimized for time series data,
     with positional encodings and configurable hyperparameters.
-
-    Attributes:
-        input_fc: Linear layer for input feature projection
-        pos_embedding: Learnable positional embeddings
-        transformer_encoder: Main transformer encoder stack
-        fc_out: Output projection layer
     """
     
     def __init__(
@@ -143,9 +265,6 @@ class TimeSeriesTransformer(nn.Module):
             prediction_length: Number of future steps to predict
         """
         super(TimeSeriesTransformer, self).__init__()
-
-        # Note: Tensor Core optimization is handled externally in train_and_save_transformer_model
-        # to avoid double optimization and maintain consistency across training pipeline
         
         self.input_fc = nn.Linear(feature_size, d_model)
         self.pos_embedding = nn.Parameter(torch.zeros(1, seq_length, d_model))
@@ -164,9 +283,6 @@ class TimeSeriesTransformer(nn.Module):
     def forward(self, src: torch.Tensor) -> torch.Tensor:
         """Forward pass through the transformer model.
         
-        Applies linear projection, positional encoding, and self-attention
-        to generate predictions from input sequences.
-
         Args:
             src: Input tensor of shape [batch_size, seq_length, feature_size]
 
@@ -179,6 +295,92 @@ class TimeSeriesTransformer(nn.Module):
         encoded = self.transformer_encoder(src)
         last_step = encoded[:, -1, :]
         return self.fc_out(last_step)
+
+# ===================== PREPROCESSING PIPELINE =====================
+def preprocess_transformer_data(
+    df_input: pd.DataFrame, 
+    seq_length: int = GPU_MODEL_CONFIG['seq_length'],
+    prediction_length: int = GPU_MODEL_CONFIG['prediction_length'],
+    feature_cols: Optional[List[str]] = None
+) -> Tuple[np.ndarray, np.ndarray, MinMaxScaler, List[str]]:
+    """Preprocess data for transformer model with sliding window approach.
+    
+    Args:
+        df_input: Input DataFrame with market data
+        seq_length: Length of input sequences
+        prediction_length: Number of future steps to predict
+        feature_cols: Feature columns to use (defaults to MODEL_FEATURES + ma_20_slope)
+        
+    Returns:
+        Tuple of (X_sequences, y_targets, scaler, feature_names)
+    """
+    logger.model(f"Starting transformer preprocessing: {df_input.shape} rows, seq_length={seq_length}")
+    
+    if df_input.empty or len(df_input) < seq_length + prediction_length + 10:
+        logger.error(f"Insufficient data: {len(df_input)} rows, need at least {seq_length + prediction_length + 10}")
+        return np.array([]), np.array([]), MinMaxScaler(), []
+    
+    df = generate_indicator_features(df_input.copy())
+    if df.empty:
+        logger.error("Feature calculation returned empty DataFrame")
+        return np.array([]), np.array([]), MinMaxScaler(), []
+    
+    if feature_cols is None:
+        feature_cols = MODEL_FEATURES.copy() + ['ma_20_slope']
+    
+    missing_cols = [col for col in feature_cols if col not in df.columns]
+    if missing_cols:
+        logger.data(f"Missing columns: {missing_cols}")
+        feature_cols = [col for col in feature_cols if col in df.columns]
+        
+    if not feature_cols:
+        logger.error("No valid feature columns found in DataFrame")
+        return np.array([]), np.array([]), MinMaxScaler(), []
+    
+    initial_len = len(df)
+    df.dropna(inplace=True)
+    if len(df) < seq_length + prediction_length + 1:
+        logger.error(f"Insufficient data after cleanup: {len(df)} rows (dropped {initial_len - len(df)} NaN)")
+        return np.array([]), np.array([]), MinMaxScaler(), []
+    
+    features = df[feature_cols].values
+    
+    if np.isnan(features).any() or np.isinf(features).any():
+        logger.warning("Cleaning invalid values in features")
+        features = safe_nan_to_num(features.astype(np.float64))
+    
+    scaler = MinMaxScaler()
+    try:
+        scaled_features = scaler.fit_transform(features)
+    except Exception as e:
+        logger.error(f"Feature scaling failed: {e}")
+        return np.array([]), np.array([]), MinMaxScaler(), []
+    
+    # Create targets (future price changes)
+    target_col_idx = feature_cols.index(COL_CLOSE)
+    X_sequences, y_targets = [], []
+    
+    for i in range(seq_length, len(scaled_features) - prediction_length + 1):
+        sequence = scaled_features[i-seq_length:i]
+        target = scaled_features[i:i+prediction_length, target_col_idx]
+        
+        if (sequence.shape[0] == seq_length and 
+            target.shape[0] == prediction_length and 
+            not (np.isnan(sequence).any() or np.isinf(sequence).any() or 
+                 np.isnan(target).any() or np.isinf(target).any())):
+            X_sequences.append(sequence)
+            y_targets.append(target)
+    
+    if not X_sequences:
+        logger.error("No valid sequences created after filtering")
+        return np.array([]), np.array([]), scaler, feature_cols
+    
+    X_sequences, y_targets = np.array(X_sequences), np.array(y_targets)
+    
+    logger.model(f"Preprocessing complete: {len(X_sequences)} sequences, shape {X_sequences.shape}")
+    logger.model(f"Target range: [{np.min(y_targets):.4f}, {np.max(y_targets):.4f}]")
+    
+    return X_sequences, y_targets, scaler, feature_cols
 
 def train_transformer_model(
     model: TimeSeriesTransformer,
@@ -193,10 +395,7 @@ def train_transformer_model(
     gradient_accumulation_steps: int = 1,
 ) -> Tuple[TimeSeriesTransformer, Dict[str, List[float]]]:
     """Train transformer model with optimizations and monitoring.
-
-    Implements optimized training with GPU acceleration, mixed precision, gradient accumulation,
-    early stopping with multiple metrics, and comprehensive logging.
-
+    
     Args:
         model: Transformer model instance to train
         train_loader: DataLoader for training batches 
@@ -210,21 +409,16 @@ def train_transformer_model(
         gradient_accumulation_steps: Steps before optimizer update
 
     Returns:
-        Tuple containing:
-            - Trained model
-            - Training history with metrics
+        Tuple containing trained model and training history with metrics
     """
     gpu_manager = get_gpu_resource_manager()
     
-    # Use GPU resource manager for better resource management
-    with gpu_manager.gpu_scope(device_id=0 if device == 'cuda' else None) as gpu_device:
-        # Determine actual device to use
+    device_id = 0 if device == 'cuda' else 0
+    with gpu_manager.gpu_scope(device_id=device_id) as gpu_device:
         actual_device = gpu_device if gpu_device is not None else torch.device('cpu')
         use_gpu = actual_device.type == 'cuda'
         
-        # GPU optimization setup with Tensor Core detection
-        use_amp = use_mixed_precision and use_gpu
-        gpu_manager = get_gpu_resource_manager()
+        use_amp = use_mixed_precision and use_gpu and autocast is not None and GradScaler is not None
         tensor_info = gpu_manager.get_tensor_core_info() if use_gpu else {'has_tensor_cores': False, 'generation': 'N/A'}
         has_tensor_cores = tensor_info['has_tensor_cores']
         
@@ -236,32 +430,29 @@ def train_transformer_model(
             else:
                 use_amp = False
                 logger.warning("GPU doesn't support mixed precision, falling back to FP32")
+        elif use_mixed_precision and use_gpu:
+            logger.warning("AMP requested but not available in this PyTorch version, falling back to FP32")
+            use_amp = False
         
         if use_gpu:
-            # Get GPU memory info using resource manager
             memory_info = gpu_manager.get_memory_info()
             logger.gpu(f"Training on GPU: {torch.cuda.get_device_name()}")
-            logger.memory(f"GPU Memory - Total: {memory_info['total'] / 1024**3:.1f} GB, "
-                         f"Allocated: {memory_info['allocated'] / 1024**3:.2f} GB, "
-                         f"Cached: {memory_info['cached'] / 1024**3:.2f} GB")
+            total_gb = safe_memory_division(memory_info['total'], 1024**3)
+            allocated_gb = safe_memory_division(memory_info['allocated'], 1024**3)
+            cached_gb = safe_memory_division(memory_info['cached'], 1024**3)
+            logger.memory(f"GPU Memory - Total: {total_gb:.1f} GB, "
+                         f"Allocated: {allocated_gb:.2f} GB, "
+                         f"Cached: {cached_gb:.2f} GB")
             
-            # GPU memory optimization with Tensor Core support
             torch.backends.cudnn.benchmark = True
             torch.backends.cudnn.deterministic = False
-            
-            # Enable optimizations for training
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
             
-            # Tensor Core specific optimizations
             if has_tensor_cores:
-                # Enable Tensor Core usage for matrix operations
                 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
-                
-                # Optimize for Tensor Core dimensions (multiples of 8 for FP16)
                 logger.gpu(f"Tensor Core optimizations enabled for {tensor_info['generation']} generation")
                 
-                # Set optimal tensor shapes for Tensor Cores
                 try:
                     if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
                         torch.backends.cuda.enable_flash_sdp(True)
@@ -269,10 +460,8 @@ def train_transformer_model(
                 except Exception as e:
                     logger.debug(f"Flash Attention not available: {e}")
             
-            # Pre-allocate GPU memory for better performance
-            if memory_info['total'] > 8 * 1024**3:  # 8GB+
+            if safe_memory_comparison(memory_info['total'], 8 * 1024**3):
                 torch.cuda.empty_cache()
-                # Pre-warm GPU with Tensor Core optimized dimensions
                 warmup_tensor_size = 64 if has_tensor_cores else 60
                 dummy_tensor = torch.randn(1, warmup_tensor_size, 10, device=actual_device)
                 del dummy_tensor
@@ -280,46 +469,44 @@ def train_transformer_model(
         else:
             logger.config("Training on CPU")
         
-        # Loss function and optimizer setup
         criterion = nn.MSELoss()
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01, eps=1e-8)
         
-        # Learning rate scheduler
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=patience//2, verbose=True, min_lr=1e-7
+            optimizer, mode='min', factor=0.5, patience=patience//2, min_lr=1e-7
         )
         
-        # Mixed precision scaler
-        scaler = GradScaler() if use_amp else None
+        scaler = None
+        if use_amp and GradScaler is not None:
+            try:
+                scaler = GradScaler()
+            except Exception as e:
+                logger.warning(f"Failed to initialize GradScaler: {e}")
+                use_amp = False
+                scaler = None
         
         model.to(actual_device)
         
-        # Model info
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         logger.model(f"Total parameters: {total_params:,}")
         logger.model(f"Trainable parameters: {trainable_params:,}")
         logger.config(f"Device: {actual_device}, Mixed Precision: {use_amp}, Gradient Accumulation: {gradient_accumulation_steps}")
         
-        # Enhanced early stopping with multiple metrics
         best_val_loss = float('inf')
         best_val_mae = float('inf')
         best_combined_score = float('-inf')
         patience_counter = 0
         best_model_state = None
         
-        # Learning rate scheduling and warmup
         warmup_epochs = max(5, epochs // 10)
         initial_lr = lr
         
-        # Apply learning rate warmup schedule
         def get_lr_for_epoch(current_epoch: int) -> float:
             if current_epoch < warmup_epochs:
-                # Linear warmup
                 return initial_lr * ((current_epoch + 1) / warmup_epochs)
-            return initial_lr  # After warmup, let scheduler take over
+            return initial_lr
         
-        # Training history
         training_history = {
             'train_loss': [],
             'val_loss': [],
@@ -331,11 +518,9 @@ def train_transformer_model(
         logger.model(f"Starting training for {epochs} epochs (warmup: {warmup_epochs} epochs)...")
         
         for epoch in range(epochs):
-            # Memory cleanup at epoch start
             if use_gpu:
                 torch.cuda.empty_cache()
                 
-            # Apply learning rate warmup if in warmup phase
             if epoch < warmup_epochs:
                 new_lr = get_lr_for_epoch(epoch)
                 for param_group in optimizer.param_groups:
@@ -343,7 +528,6 @@ def train_transformer_model(
                 if epoch == 0:
                     logger.config(f"Learning rate warmup: {new_lr:.2e} -> {initial_lr:.2e} over {warmup_epochs} epochs")
                     
-            # Training phase
             model.train()
             train_losses = []
             optimizer.zero_grad()
@@ -352,22 +536,24 @@ def train_transformer_model(
                 x_batch = x_batch.to(actual_device, non_blocking=True)
                 y_batch = y_batch.to(actual_device, non_blocking=True)
 
-                # Forward pass with optional mixed precision
-                if use_amp and scaler is not None:
-                    with autocast(device_type='cuda'):
-                        output = model(x_batch)
-                        loss = criterion(output, y_batch)
-                        loss = loss / gradient_accumulation_steps  # Scale loss for gradient accumulation
+                if use_amp and scaler is not None and autocast is not None:
+                    try:
+                        with autocast(device_type='cuda'): # type: ignore
+                            output = model(x_batch)
+                            loss = criterion(output, y_batch)
+                            loss = loss / gradient_accumulation_steps
+                    except TypeError:
+                        with autocast(device_type='cuda'): # type: ignore
+                            output = model(x_batch)
+                            loss = criterion(output, y_batch)
+                            loss = loss / gradient_accumulation_steps
                     
-                    # Backward pass with gradient scaling
                     scaler.scale(loss).backward()
                     
-                    # Gradient accumulation - handle last batch correctly
                     accumulate_step = (batch_idx + 1) % gradient_accumulation_steps == 0
                     is_last_batch = (batch_idx + 1) == len(train_loader)
                     
                     if accumulate_step or is_last_batch:
-                        # Gradient clipping before optimizer step
                         scaler.unscale_(optimizer)
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                         
@@ -375,14 +561,13 @@ def train_transformer_model(
                         scaler.update()
                         optimizer.zero_grad()
                         
-                    train_losses.append(loss.item() * gradient_accumulation_steps)  # Restore original loss scale
+                    train_losses.append(loss.item() * gradient_accumulation_steps)
                 else:
                     output = model(x_batch)
                     loss = criterion(output, y_batch)
                     loss = loss / gradient_accumulation_steps
                     loss.backward()
                     
-                    # Gradient accumulation with consistent variables
                     accumulate_step = (batch_idx + 1) % gradient_accumulation_steps == 0
                     is_last_batch = (batch_idx + 1) == len(train_loader)
                     
@@ -391,21 +576,21 @@ def train_transformer_model(
                         optimizer.step()
                         optimizer.zero_grad()
                     
-                    train_losses.append(loss.item() * gradient_accumulation_steps)  # Restore original loss scale
+                    train_losses.append(loss.item() * gradient_accumulation_steps)
                 
-                # GPU memory monitoring using resource manager
                 if use_gpu and batch_idx % 20 == 0:
                     memory_info = gpu_manager.get_memory_info()
                     if batch_idx % 100 == 0:
+                        allocated_gb = safe_memory_division(memory_info['allocated'], 1024**3)
+                        cached_gb = safe_memory_division(memory_info['cached'], 1024**3)
                         logger.memory(f"Epoch {epoch+1}, Batch {batch_idx}: GPU Memory - "
-                                    f"Allocated: {memory_info['allocated'] / 1024**3:.2f}GB, "
-                                    f"Cached: {memory_info['cached'] / 1024**3:.2f}GB")
+                                    f"Allocated: {allocated_gb:.2f}GB, "
+                                    f"Cached: {cached_gb:.2f}GB")
 
             mean_train_loss = np.mean(train_losses)
             training_history['train_loss'].append(mean_train_loss)
             training_history['learning_rates'].append(optimizer.param_groups[0]['lr'])
 
-            # Validation phase with enhanced metrics
             if val_loader is not None:
                 model.eval()
                 val_losses = []
@@ -416,17 +601,21 @@ def train_transformer_model(
                         x_val = x_val.to(actual_device, non_blocking=True)
                         y_val = y_val.to(actual_device, non_blocking=True)
                         
-                        if use_amp:
-                            with autocast(device_type='cuda'):
-                                output_val = model(x_val)
-                                loss_val = criterion(output_val, y_val)
+                        if use_amp and autocast is not None:
+                            try:
+                                with autocast(device_type='cuda'): # type: ignore
+                                    output_val = model(x_val)   
+                                    loss_val = criterion(output_val, y_val)
+                            except TypeError:
+                                with autocast(device_type='cuda'): # type: ignore
+                                    output_val = model(x_val)
+                                    loss_val = criterion(output_val, y_val)
                         else:
                             output_val = model(x_val)
                             loss_val = criterion(output_val, y_val)
                         
                         val_losses.append(loss_val.item())
                         
-                        # Calculate MAE for additional metric
                         mae_val = torch.mean(torch.abs(output_val - y_val)).item()
                         val_maes.append(mae_val)
                 
@@ -436,17 +625,19 @@ def train_transformer_model(
                 training_history['val_loss'].append(mean_val_loss)
                 training_history['val_mae'].append(mean_val_mae)
                 
-                # Combined score for better early stopping
                 normalized_loss = 1.0 / (1.0 + mean_val_loss)
                 normalized_mae = 1.0 / (1.0 + mean_val_mae)
                 combined_score = 0.6 * normalized_loss + 0.4 * normalized_mae
                 training_history['combined_scores'].append(combined_score)
                 
-                # Learning rate scheduling (only after warmup)
                 if epoch >= warmup_epochs:
+                    prev_lr = optimizer.param_groups[0]['lr']
                     scheduler.step(mean_val_loss)
+                    current_lr = optimizer.param_groups[0]['lr']
+                    
+                    if current_lr != prev_lr:
+                        logger.model(f"Learning rate reduced from {prev_lr:.2e} to {current_lr:.2e} (ReduceLROnPlateau)")
                 
-                # Enhanced early stopping with multiple criteria
                 if use_early_stopping:
                     improved = False
                     improvement_reasons = []
@@ -481,11 +672,11 @@ def train_transformer_model(
                             logger.model("🔄 Restored best model state")
                         break
                 
-                # Progress logging with memory info
                 memory_info_str = ""
                 if use_gpu:
                     memory_info = gpu_manager.get_memory_info()
-                    memory_info_str = f", GPU Mem: {memory_info['allocated'] / 1024**3:.2f}GB"
+                    allocated_gb = safe_memory_division(memory_info['allocated'], 1024**3)
+                    memory_info_str = f", GPU Mem: {allocated_gb:.2f}GB"
                 
                 current_lr = optimizer.param_groups[0]['lr']
                 early_stop_info = f", Patience: {patience_counter}/{patience}" if use_early_stopping else ""
@@ -494,17 +685,16 @@ def train_transformer_model(
                                  f"Val Loss: {mean_val_loss:.6f}, Val MAE: {mean_val_mae:.6f}, "
                                  f"Combined: {combined_score:.6f}, LR: {current_lr:.2e}{early_stop_info}{memory_info_str}")
             else:
-                # No validation data
                 memory_info_str = ""
                 if use_gpu:
                     memory_info = gpu_manager.get_memory_info()
-                    memory_info_str = f", GPU Mem: {memory_info['allocated'] / 1024**3:.2f}GB"
+                    allocated_gb = safe_memory_division(memory_info['allocated'], 1024**3)
+                    memory_info_str = f", GPU Mem: {allocated_gb:.2f}GB"
                 
                 current_lr = optimizer.param_groups[0]['lr']
                 logger.performance(f"Epoch [{epoch+1}/{epochs}] - Train Loss: {mean_train_loss:.6f}, "
                                  f"LR: {current_lr:.2e}{memory_info_str}")
         
-        # Training summary
         if training_history['val_loss']:
             final_val_loss = training_history['val_loss'][-1]
             best_val_loss_epoch = np.argmin(training_history['val_loss']) + 1
@@ -513,7 +703,6 @@ def train_transformer_model(
                           f"Best Val Loss: {min(training_history['val_loss']):.6f} (Epoch {best_val_loss_epoch})")
             logger.success(f"📊 Best Combined Score: {max(training_history['combined_scores']):.6f} (Epoch {best_combined_epoch})")
             
-            # Performance improvement metrics
             if len(training_history['val_loss']) > 1:
                 loss_improvement = (training_history['val_loss'][0] - min(training_history['val_loss'])) / training_history['val_loss'][0] * 100
                 logger.analysis(f"📈 Loss improvement: {loss_improvement:.2f}%")
@@ -521,57 +710,205 @@ def train_transformer_model(
             final_train_loss = training_history['train_loss'][-1]
             logger.success(f"📊 Training completed - Final Train Loss: {final_train_loss:.6f}")
 
-        # GPU resource manager will automatically cleanup when exiting context
         return model, training_history
 
-def evaluate_model(
-    model: TimeSeriesTransformer, 
-    test_loader: DataLoader, 
-    scaler: MinMaxScaler,
-    feature_cols: List[str], 
-    target_col_idx: int, 
-    device: str = 'cpu'
-) -> Tuple[float, float]:
-    """Evaluate model on test data and compute performance metrics.
+def train_and_save_transformer_model(
+    df_input: pd.DataFrame, 
+    model_filename: Optional[str] = None
+) -> Tuple[Optional[TimeSeriesTransformer], str]:
+    """Train and save a transformer model with bias detection and optimization.
     
     Args:
-        model: Model to evaluate
-        test_loader: Test data loader
-        scaler: Scaler for inverse transforms
-        feature_cols: Feature column names
-        target_col_idx: Index of target column
-        device: Device to use for evaluation
-    
+        df_input: Input DataFrame with market data
+        model_filename: Optional filename for saving the model
+        
     Returns:
-        Tuple of (mse, mae) metrics
+        Tuple of (trained_model, model_path) or (None, "") if training fails
     """
-    model.eval()
-    real_prices, predicted_prices = [], []
-
-    with torch.no_grad():
-        for x_batch, y_batch in test_loader:
-            x_batch = x_batch.to(device)
-            predictions = model(x_batch).cpu().numpy()
-            y_batch = y_batch.cpu().numpy()
-
-            for i in range(len(predictions)):
-                dummy_pred = np.zeros((1, len(feature_cols)))
-                dummy_pred[:, target_col_idx] = predictions[i]
-                dummy_real = np.zeros((1, len(feature_cols)))
-                dummy_real[:, target_col_idx] = y_batch[i]
-
-                pred_inversed = scaler.inverse_transform(dummy_pred)[:, target_col_idx]
-                real_inversed = scaler.inverse_transform(dummy_real)[:, target_col_idx]
-
-                predicted_prices.extend(pred_inversed)
-                real_prices.extend(real_inversed)
-
-    real_prices, predicted_prices = np.array(real_prices).flatten(), np.array(predicted_prices).flatten()
-    mse = float(np.mean((real_prices - predicted_prices) ** 2))
-    mae = float(np.mean(np.abs(real_prices - predicted_prices)))
-
-    logger.performance(f"Model Evaluation - MSE: {mse:.4f}, MAE: {mae:.4f}")
-    return mse, mae
+    try:
+        if df_input.empty:
+            logger.error("Input DataFrame is empty")
+            return None, ""
+        logger.model(f"Training transformer with {len(df_input)} rows")
+        if len(df_input) < MIN_DATA_POINTS:
+            logger.error(f"Insufficient data for training: {len(df_input)} < {MIN_DATA_POINTS}")
+            return None, ""
+        gpu_manager = get_gpu_resource_manager()
+        tensor_info = gpu_manager.get_tensor_core_info() if gpu_available else {'has_tensor_cores': False, 'generation': 'N/A'}
+        has_tensor_cores = tensor_info['has_tensor_cores']
+        if has_tensor_cores:
+            logger.gpu(f"Detected {tensor_info['generation']} Tensor Cores - Optimization enabled")
+        
+        X, y, scaler, feature_cols = preprocess_transformer_data(df_input)
+        if len(X) == 0:
+            logger.error("Data preprocessing failed - no valid sequences created")
+            return None, ""
+        
+        target_idx = feature_cols.index(COL_CLOSE)
+        seq_len, pred_len = GPU_MODEL_CONFIG['seq_length'], GPU_MODEL_CONFIG['prediction_length']
+        dataset = CryptoDataset(X, y)
+        
+        if len(dataset) < 100:
+            logger.error(f"Insufficient samples for training: {len(dataset)}")
+            return None, ""
+        
+        n = len(dataset)
+        n_train, n_val = int(n * 0.8), int(n * 0.1)
+        train_ds = torch.utils.data.Subset(dataset, range(0, n_train))
+        val_ds = torch.utils.data.Subset(dataset, range(n_train, n_train + n_val))
+        
+        batch_size = 32
+        if gpu_available:
+            gpu_manager = get_gpu_resource_manager()
+            memory_info = gpu_manager.get_memory_info()
+            total_memory_gb = float(memory_info['total']) / 1024**3 if isinstance(memory_info['total'], (int, float)) else 0
+            if total_memory_gb >= 24:
+                base_batch_size = 128
+            elif total_memory_gb >= 16:
+                base_batch_size = 96
+            elif total_memory_gb >= 12:
+                base_batch_size = 80
+            elif total_memory_gb >= 8:
+                base_batch_size = 64
+            else:
+                base_batch_size = 48
+            if has_tensor_cores:
+                batch_size = ((base_batch_size + 7) // 8) * 8
+                logger.gpu(f"Using Tensor Core optimized batch size: {batch_size} (GPU Memory: {total_memory_gb:.1f}GB)")
+            else:
+                batch_size = base_batch_size
+                logger.gpu(f"Using GPU-optimized batch size: {batch_size} (GPU Memory: {total_memory_gb:.1f}GB)")
+        
+        pin_memory = gpu_available
+        cpu_count = os.cpu_count() or 2
+        num_workers = 0 if gpu_available else min(4, cpu_count // 2)
+        
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, 
+                                 pin_memory=pin_memory, num_workers=num_workers, 
+                                 persistent_workers=True if num_workers > 0 else False)
+        val_loader = DataLoader(val_ds, batch_size=batch_size * 2, shuffle=False,
+                               pin_memory=pin_memory, num_workers=num_workers,
+                               persistent_workers=True if num_workers > 0 else False)
+        
+        device = 'cuda' if gpu_available else 'cpu'
+        logger.config(f"Training on device: {device}")
+        
+        model_config = GPU_MODEL_CONFIG.copy() if gpu_available else CPU_MODEL_CONFIG.copy()
+        model_config['feature_size'] = len(feature_cols)
+        
+        if gpu_available and has_tensor_cores:
+            original_d_model = model_config['d_model']
+            original_feedforward = model_config['dim_feedforward']
+            model_config['d_model'] = ((original_d_model + 7) // 8) * 8
+            model_config['dim_feedforward'] = ((original_feedforward + 7) // 8) * 8
+            if model_config['d_model'] != original_d_model or model_config['dim_feedforward'] != original_feedforward:
+                logger.gpu(f"Optimized model dimensions for Tensor Cores: "
+                          f"d_model {original_d_model} -> {model_config['d_model']}, "
+                          f"feedforward {original_feedforward} -> {model_config['dim_feedforward']}")
+        
+        model = TimeSeriesTransformer(**model_config)
+        trained_model, training_history = train_transformer_model(
+            model=model, 
+            train_loader=train_loader, 
+            val_loader=val_loader, 
+            device=device, 
+            epochs=DEFAULT_EPOCHS,
+            use_early_stopping=True,
+            patience=15,
+            use_mixed_precision=gpu_available,
+            gradient_accumulation_steps=2 if gpu_available else 1,
+            lr=3e-4 if gpu_available else 1e-3
+        )
+        
+        logger.analysis("="*60)
+        logger.analysis("TRAINING DATA ANALYSIS FOR BIAS DETECTION")
+        logger.analysis("="*60)
+        
+        df_with_features = generate_indicator_features(df_input)
+        sample_size = min(1000, len(df_with_features) - FUTURE_RETURN_SHIFT)
+        if sample_size > 0:
+            sample_data = df_with_features.tail(sample_size)
+            future_returns = sample_data[COL_CLOSE].shift(FUTURE_RETURN_SHIFT) / sample_data[COL_CLOSE] - 1
+            future_returns = future_returns.dropna()
+            
+            if len(future_returns) > 0:
+                positive_returns = (future_returns > BUY_THRESHOLD).sum()
+                negative_returns = (future_returns < SELL_THRESHOLD).sum()
+                neutral_returns = len(future_returns) - positive_returns - negative_returns
+                
+                logger.analysis(f"Historical price movement distribution:")
+                logger.analysis(f"  • Positive moves (>{BUY_THRESHOLD:.4f}): {positive_returns} ({positive_returns/len(future_returns):.1%})")
+                logger.analysis(f"  • Negative moves (<{SELL_THRESHOLD:.4f}): {negative_returns} ({negative_returns/len(future_returns):.1%})")
+                logger.analysis(f"  • Neutral moves: {neutral_returns} ({neutral_returns/len(future_returns):.1%})")
+                logger.analysis(f"  • Mean return: {future_returns.mean():.6f}")
+                logger.analysis(f"  • Std return: {future_returns.std():.6f}")
+                
+                if negative_returns / len(future_returns) < 0.2:
+                    logger.warning("⚠️  TRAINING DATA BIAS DETECTED:")
+                    logger.warning("   Historical data shows fewer downward movements")
+                    logger.warning("   This may cause model to be biased toward bullish predictions")
+        
+        suggested_buy_threshold, suggested_sell_threshold = analyze_model_bias_and_adjust_thresholds(
+            df_with_features, trained_model, scaler, feature_cols, target_idx, device
+        )
+        
+        logger.analysis("="*60)
+        
+        if model_filename is None:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            model_filename = f"{TRANSFORMER_MODEL_FILENAME.split('.')[0]}_{timestamp}.pth"
+        
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        model_path = MODELS_DIR / model_filename
+        
+        checkpoint = {
+            'model_state_dict': trained_model.state_dict(),
+            'model_config': {
+                'feature_size': len(feature_cols),
+                'seq_length': model_config['seq_length'],
+                'prediction_length': model_config['prediction_length'],
+                'num_layers': model_config['num_layers'],
+                'd_model': model_config['d_model'],
+                'nhead': model_config['nhead'],
+                'dim_feedforward': model_config['dim_feedforward'],
+                'dropout': model_config['dropout']
+            },
+            'data_info': {
+                'scaler': scaler,
+                'feature_cols': feature_cols,
+                'target_idx': target_idx,
+                'sequence_length': seq_len
+            },
+            'optimization_results': {
+                'suggested_buy_threshold': suggested_buy_threshold,
+                'suggested_sell_threshold': suggested_sell_threshold,
+                'buy_threshold': BUY_THRESHOLD,
+                'sell_threshold': SELL_THRESHOLD
+            },
+            'training_history': training_history,
+            'training_metadata': {
+                'total_samples': len(df_input),
+                'tensor_cores': has_tensor_cores,
+                'tensor_core_generation': tensor_info.get('generation', 'N/A'),
+                'device': device,
+                'mixed_precision': gpu_available
+            }
+        }
+        
+        success = safe_save_model(checkpoint, str(model_path))
+        if success:
+            logger.success(f"Model saved to {model_path}")
+        else:
+            logger.error(f"Failed to save model to {model_path}")
+        
+        return trained_model, str(model_path)
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Error training transformer model: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return None, ""
 
 def get_latest_transformer_signal(
     df_market_data: pd.DataFrame, 
@@ -585,35 +922,56 @@ def get_latest_transformer_signal(
     """Generate trading signal using transformer model predictions.
     
     Args:
-        df_market_data: Market data with OHLCV
+        df_market_data: Market data DataFrame
         model: Trained transformer model
-        scaler: Fitted scaler for features
-        feature_cols: Feature column names
+        scaler: Fitted MinMaxScaler instance
+        feature_cols: List of feature column names
         target_col_idx: Index of target column
         device: Device for inference
-        suggested_thresholds: Custom (buy, sell) thresholds
-    
+        suggested_thresholds: Optional custom buy/sell thresholds
+        
     Returns:
-        Trading signal (LONG, SHORT, or NEUTRAL)
+        Trading signal: 'LONG', 'SHORT', or 'NEUTRAL'
     """
     try:
-        if df_market_data.empty:
-            logger.warning("Input DataFrame for signal generation is empty")
+        if df_market_data is None or df_market_data.empty:
+            logger.warning("Input DataFrame is empty")
             return SIGNAL_NEUTRAL
+            
+        if model is None:
+            logger.error("Model is None")
+            return SIGNAL_NEUTRAL
+            
+        if scaler is None:
+            logger.error("Scaler is None")
+            return SIGNAL_NEUTRAL
+            
+        if not feature_cols:
+            logger.error("Feature columns list is empty")
+            return SIGNAL_NEUTRAL
+        
+        symbol_name = 'UNKNOWN'
+        if hasattr(df_market_data, 'symbol'):
+            symbol_name = df_market_data.symbol
+        elif 'symbol' in df_market_data.columns:
+            symbol_name = df_market_data['symbol'].iloc[0]
+        
+        logger.signal(f"[{symbol_name}] Starting transformer signal generation...")
         
         df_with_features = generate_indicator_features(df_market_data.copy())
         if df_with_features.empty:
-            logger.warning("DataFrame became empty after feature calculation")
+            logger.warning(f"[{symbol_name}] DataFrame became empty after feature calculation")
             return SIGNAL_NEUTRAL
 
         seq_length = model.pos_embedding.shape[1]
         if len(df_with_features) < seq_length:
-            logger.warning(f"Insufficient data for prediction: {len(df_with_features)} < {seq_length}")
+            logger.warning(f"[{symbol_name}] Insufficient data for prediction: {len(df_with_features)} < {seq_length}")
             return SIGNAL_NEUTRAL
 
         available_features = [col for col in feature_cols if col in df_with_features.columns]
         if len(available_features) != len(feature_cols):
-            logger.warning(f"Missing features: {set(feature_cols) - set(available_features)}")
+            missing_features = set(feature_cols) - set(available_features)
+            logger.warning(f"[{symbol_name}] Missing features: {missing_features}")
             return SIGNAL_NEUTRAL
 
         latest_sequence = df_with_features[available_features].iloc[-seq_length:].values
@@ -632,13 +990,6 @@ def get_latest_transformer_signal(
         
         price_change = (predicted_price - current_price) / current_price
         buy_thr, sell_thr = suggested_thresholds if suggested_thresholds else (BUY_THRESHOLD, SELL_THRESHOLD)
-        
-        # Get symbol name safely
-        symbol_name = 'UNKNOWN'
-        if hasattr(df_market_data, 'symbol'):
-            symbol_name = df_market_data.symbol
-        elif 'symbol' in df_market_data.columns:
-            symbol_name = df_market_data['symbol'].iloc[0]
         logger.signal(f"[{symbol_name}] Current: {current_price:.6f}, Predicted: {predicted_price:.6f}")
         logger.analysis(f"[{symbol_name}] Price change: {price_change:.6f} ({price_change:.2%})")
         logger.config(f"[{symbol_name}] Thresholds - BUY: {buy_thr:.6f}, SELL: {sell_thr:.6f}")
@@ -724,7 +1075,7 @@ def analyze_model_bias_and_adjust_thresholds(
                     else:
                         continue
                     
-                    input_tensor = torch.tensor(sequence_data, dtype=torch.float32).unsqueeze(0).to(device)
+                    input_tensor = torch.tensor(sequence_scaled, dtype=torch.float32).unsqueeze(0).to(device)
                     prediction_scaled = model(input_tensor).cpu().numpy()[0, 0]
                     
                     if not np.isfinite(prediction_scaled):
@@ -763,12 +1114,12 @@ def analyze_model_bias_and_adjust_thresholds(
         
         if short_pct < 15.0 or long_pct < 15.0:
             if short_pct < 15.0:
-                sell_percentile = np.percentile(predictions, 25)
+                sell_percentile = float(np.percentile(predictions, 25))
                 suggested_sell_threshold = max(sell_percentile, SELL_THRESHOLD * 0.5)
                 suggested_sell_threshold = max(suggested_sell_threshold, -0.05)
                 
             if long_pct < 15.0:
-                buy_percentile = np.percentile(predictions, 75)
+                buy_percentile = float(np.percentile(predictions, 75))
                 suggested_buy_threshold = min(buy_percentile, BUY_THRESHOLD * 0.5)
                 suggested_buy_threshold = min(suggested_buy_threshold, 0.05)
         
@@ -782,204 +1133,54 @@ def analyze_model_bias_and_adjust_thresholds(
         logger.error(f"Error in bias analysis: {e}")
         return BUY_THRESHOLD, SELL_THRESHOLD
 
-def train_and_save_transformer_model(
-    df_input: pd.DataFrame, 
-    model_filename: Optional[str] = None
-) -> Tuple[Optional[TimeSeriesTransformer], str]:
-    """Train and save a transformer model with bias detection and optimization.
+def evaluate_model(
+    model: TimeSeriesTransformer, 
+    test_loader: DataLoader, 
+    scaler: MinMaxScaler,
+    feature_cols: List[str], 
+    target_col_idx: int, 
+    device: str = 'cpu'
+) -> Tuple[float, float]:
+    """Evaluate model on test data and compute performance metrics.
     
     Args:
-        df_input: Input DataFrame with market data
-        model_filename: Custom filename for model (auto-generated if None)
-        
+        model: Model to evaluate
+        test_loader: Test data loader
+        scaler: Scaler for inverse transforms
+        feature_cols: Feature column names
+        target_col_idx: Index of target column
+        device: Device to use for evaluation
+    
     Returns:
-        Tuple of (trained_model, model_path) or (None, "") if failed
+        Tuple of (mse, mae) metrics
     """
-    try:
-        if df_input.empty:
-            logger.error("Input DataFrame is empty")
-            return None, ""
-        
-        logger.model(f"Training transformer with {len(df_input)} rows")
-        
-        if len(df_input) < MIN_DATA_POINTS:
-            logger.error(f"Insufficient data for training: {len(df_input)} < {MIN_DATA_POINTS}")
-            return None, ""
-        
-        # Check for Tensor Core support for model optimization
-        gpu_manager = get_gpu_resource_manager()
-        tensor_info = gpu_manager.get_tensor_core_info() if gpu_available else {'has_tensor_cores': False, 'generation': 'N/A'}
-        has_tensor_cores = tensor_info['has_tensor_cores']
-        
-        if has_tensor_cores:
-            logger.gpu(f"Detected {tensor_info['generation']} Tensor Cores - Optimization enabled")
-        
-        df_with_features = generate_indicator_features(df_input)
-        if df_with_features.empty:
-            logger.error("No data after feature calculation")
-            return None, ""
-        
-        data_scaled, scaler, feature_cols = select_and_scale_features(df_with_features)
-        target_idx = feature_cols.index(COL_CLOSE)
-        
-        seq_len, pred_len = GPU_MODEL_CONFIG['seq_length'], GPU_MODEL_CONFIG['prediction_length']
-        dataset = CryptoDataset(data_scaled, seq_len, pred_len, len(feature_cols), target_idx)
-        
-        if len(dataset) < 100:
-            logger.error(f"Insufficient samples for training: {len(dataset)}")
-            return None, ""
-        
-        n = len(dataset)
-        n_train, n_val = int(n * 0.8), int(n * 0.1)
-        
-        train_ds = torch.utils.data.Subset(dataset, range(0, n_train))
-        val_ds = torch.utils.data.Subset(dataset, range(n_train, n_train + n_val))
-        
-        batch_size = 32
-        if gpu_available:
-            gpu_manager = get_gpu_resource_manager()
-            memory_info = gpu_manager.get_memory_info()
-            total_memory_gb = memory_info['total'] / 1024**3
-            
-            # Optimize batch size for both memory and Tensor Cores
-            if total_memory_gb >= 24:
-                base_batch_size = 128
-            elif total_memory_gb >= 16:
-                base_batch_size = 96
-            elif total_memory_gb >= 12:
-                base_batch_size = 80
-            elif total_memory_gb >= 8:
-                base_batch_size = 64
-            else:
-                base_batch_size = 48
-            
-            # Adjust for Tensor Core optimization (prefer multiples of 8)
-            if has_tensor_cores:
-                batch_size = ((base_batch_size + 7) // 8) * 8  # Round to nearest multiple of 8
-                logger.gpu(f"Using Tensor Core optimized batch size: {batch_size} (GPU Memory: {total_memory_gb:.1f}GB)")
-            else:
-                batch_size = base_batch_size
-                logger.gpu(f"Using GPU-optimized batch size: {batch_size} (GPU Memory: {total_memory_gb:.1f}GB)")
-        
-        pin_memory = gpu_available
-        num_workers = 0 if gpu_available else min(4, os.cpu_count() // 2)
-        
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, 
-                                 pin_memory=pin_memory, num_workers=num_workers, 
-                                 persistent_workers=True if num_workers > 0 else False)
-        
-        val_loader = DataLoader(val_ds, batch_size=batch_size * 2, shuffle=False,
-                               pin_memory=pin_memory, num_workers=num_workers,
-                               persistent_workers=True if num_workers > 0 else False)
-        
-        device = 'cuda' if gpu_available else 'cpu'
-        logger.config(f"Training on device: {device}")
-        
-        # Fix feature size mismatch and optimize for Tensor Cores
-        model_config = GPU_MODEL_CONFIG.copy() if gpu_available else CPU_MODEL_CONFIG.copy()
-        model_config['feature_size'] = len(feature_cols)
-        
-        # Optimize model dimensions for Tensor Cores if available
-        if gpu_available and has_tensor_cores:
-            # Ensure d_model and feedforward dimensions are multiples of 8 for optimal Tensor Core usage
-            original_d_model = model_config['d_model']
-            original_feedforward = model_config['dim_feedforward']
-            
-            # Round up to nearest multiple of 8
-            model_config['d_model'] = ((original_d_model + 7) // 8) * 8
-            model_config['dim_feedforward'] = ((original_feedforward + 7) // 8) * 8
-            
-            if model_config['d_model'] != original_d_model or model_config['dim_feedforward'] != original_feedforward:
-                logger.gpu(f"Optimized model dimensions for Tensor Cores: "
-                          f"d_model {original_d_model} -> {model_config['d_model']}, "
-                          f"feedforward {original_feedforward} -> {model_config['dim_feedforward']}")
-        
-        model = TimeSeriesTransformer(**model_config)
-        
-        trained_model, training_history = train_transformer_model(
-            model=model, 
-            train_loader=train_loader, 
-            val_loader=val_loader, 
-            device=device, 
-            epochs=DEFAULT_EPOCHS,
-            use_early_stopping=True,
-            patience=15,
-            use_mixed_precision=gpu_available,
-            gradient_accumulation_steps=2 if gpu_available else 1,
-            lr=3e-4 if gpu_available else 1e-3
-        )
-        
-        logger.analysis("="*60)
-        logger.analysis("TRAINING DATA ANALYSIS FOR BIAS DETECTION")
-        logger.analysis("="*60)
-        
-        sample_size = min(1000, len(df_with_features) - FUTURE_RETURN_SHIFT)
-        if sample_size > 0:
-            sample_data = df_with_features.tail(sample_size)
-            future_returns = sample_data[COL_CLOSE].shift(FUTURE_RETURN_SHIFT) / sample_data[COL_CLOSE] - 1
-            future_returns = future_returns.dropna()
-            
-            if len(future_returns) > 0:
-                positive_returns = (future_returns > BUY_THRESHOLD).sum()
-                negative_returns = (future_returns < SELL_THRESHOLD).sum()
-                neutral_returns = len(future_returns) - positive_returns - negative_returns
-                
-                logger.analysis(f"Historical price movement distribution:")
-                logger.analysis(f"  • Positive moves (>{BUY_THRESHOLD:.4f}): {positive_returns} ({positive_returns/len(future_returns):.1%})")
-                logger.analysis(f"  • Negative moves (<{SELL_THRESHOLD:.4f}): {negative_returns} ({negative_returns/len(future_returns):.1%})")
-                logger.analysis(f"  • Neutral moves: {neutral_returns} ({neutral_returns/len(future_returns):.1%})")
-                logger.analysis(f"  • Mean return: {future_returns.mean():.6f}")
-                logger.analysis(f"  • Std return: {future_returns.std():.6f}")
-                
-                if negative_returns / len(future_returns) < 0.2:
-                    logger.warning("⚠️  TRAINING DATA BIAS DETECTED:")
-                    logger.warning("   Historical data shows fewer downward movements")
-                    logger.warning("   This may cause model to be biased toward bullish predictions")
-        
-        suggested_buy_threshold, suggested_sell_threshold = analyze_model_bias_and_adjust_thresholds(
-            df_with_features, trained_model, scaler, feature_cols, target_idx, device
-        )
-        
-        logger.analysis("="*60)
-        
-        if model_filename is None:
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            model_filename = f"{TRANSFORMER_MODEL_FILENAME.split('.')[0]}_{timestamp}.pth"
-        
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        model_path = MODELS_DIR / model_filename
-        
-        torch.save({
-            'model_state_dict': trained_model.state_dict(),
-            'model_config': {
-                'feature_size': len(feature_cols),
-                'seq_length': model_config['seq_length'],
-                'prediction_length': model_config['prediction_length'],
-                'num_layers': model_config['num_layers'],
-                'd_model': model_config['d_model'],
-                'nhead': model_config['nhead'],
-                'dim_feedforward': model_config['dim_feedforward'],
-                'dropout': model_config['dropout']
-            },
-            'scaler': scaler,
-            'feature_cols': feature_cols,
-            'target_idx': target_idx,
-            'training_stats': {
-                'total_samples': len(df_with_features),
-                'buy_threshold': BUY_THRESHOLD,
-                'sell_threshold': SELL_THRESHOLD,
-                'suggested_buy_threshold': suggested_buy_threshold,
-                'suggested_sell_threshold': suggested_sell_threshold
-            }
-        }, model_path)
-        
-        logger.success(f"Model saved to {model_path}")
-        return trained_model, str(model_path)
-        
-    except Exception as e:
-        logger.error(f"Error training transformer model: {e}")
-        return None, ""
+    model.eval()
+    real_prices, predicted_prices = [], []
+
+    with torch.no_grad():
+        for x_batch, y_batch in test_loader:
+            x_batch = x_batch.to(device)
+            predictions = model(x_batch).cpu().numpy()
+            y_batch = y_batch.cpu().numpy()
+
+            for i in range(len(predictions)):
+                dummy_pred = np.zeros((1, len(feature_cols)))
+                dummy_pred[:, target_col_idx] = predictions[i]
+                dummy_real = np.zeros((1, len(feature_cols)))
+                dummy_real[:, target_col_idx] = y_batch[i]
+
+                pred_inversed = scaler.inverse_transform(dummy_pred)[:, target_col_idx]
+                real_inversed = scaler.inverse_transform(dummy_real)[:, target_col_idx]
+
+                predicted_prices.extend(pred_inversed)
+                real_prices.extend(real_inversed)
+
+    real_prices, predicted_prices = np.array(real_prices).flatten(), np.array(predicted_prices).flatten()
+    mse = float(np.mean((real_prices - predicted_prices) ** 2))
+    mae = float(np.mean(np.abs(real_prices - predicted_prices)))
+
+    logger.performance(f"Model Evaluation - MSE: {mse:.4f}, MAE: {mae:.4f}")
+    return mse, mae
 
 def load_transformer_model(
     model_path: Optional[str] = None
@@ -987,58 +1188,50 @@ def load_transformer_model(
     """Load a trained transformer model with comprehensive error handling.
     
     Args:
-        model_path: Path to model file (uses default if None)
+        model_path: Path to the model file (defaults to TRANSFORMER_MODEL_FILENAME)
         
     Returns:
-        Tuple containing:
-            - Loaded TimeSeriesTransformer model or None if failed
-            - MinMaxScaler instance or None
-            - List of feature column names or None
-            - Target column index or None
+        Tuple of (model, scaler, feature_cols, target_idx) or (None, None, None, None) if loading fails
     """
     if model_path is None:
         model_path = str(MODELS_DIR / TRANSFORMER_MODEL_FILENAME)
-
     if not os.path.exists(model_path):
         logger.error(f"Model file does not exist: {model_path}")
         return None, None, None, None
-
     try:
-        checkpoint = None
-        
-        # PyTorch 2.6+ safe loading strategy with multiple fallbacks
-        try:
-            # Attempt 1: Try with weights_only=False (default safe mode)
-            checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
-        except (TypeError, AttributeError):
-            try:
-                # Attempt 2: Try older PyTorch loading method
-                checkpoint = torch.load(model_path, map_location='cpu')
-            except Exception as e:
-                logger.error(f"Failed to load model: {e}")
-                return None, None, None, None
-        
+        checkpoint = safe_load_model(model_path)
         if checkpoint is None:
             logger.error("Failed to load checkpoint")
             return None, None, None, None
-
-        required_keys = ['model_state_dict', 'model_config', 'scaler', 'feature_cols', 'target_idx']
+        
+        if 'data_info' in checkpoint:
+            data_info = checkpoint['data_info']
+            scaler = data_info.get('scaler')
+            feature_cols = data_info.get('feature_cols')
+            target_idx = data_info.get('target_idx')
+        else:
+            scaler = checkpoint.get('scaler')
+            feature_cols = checkpoint.get('feature_cols')
+            target_idx = checkpoint.get('target_idx')
+        
+        required_keys = ['model_state_dict', 'model_config']
         missing_keys = [key for key in required_keys if key not in checkpoint]
         if missing_keys:
             logger.error(f"Missing keys in checkpoint: {missing_keys}")
             return None, None, None, None
-
+        
+        if scaler is None or feature_cols is None or target_idx is None:
+            logger.error("Missing scaler, feature_cols, or target_idx in checkpoint")
+            return None, None, None, None
+        
         config = checkpoint['model_config']
         model = TimeSeriesTransformer(**config)
         model.load_state_dict(checkpoint['model_state_dict'])
-
-        scaler = checkpoint['scaler']
-        feature_cols = checkpoint['feature_cols']
-        target_idx = checkpoint['target_idx']
-
+        
         logger.success(f"Model loaded successfully from {model_path}")
         return model, scaler, feature_cols, target_idx
         
     except Exception as e:
         logger.error(f"Error loading model from {model_path}: {e}")
         return None, None, None, None
+

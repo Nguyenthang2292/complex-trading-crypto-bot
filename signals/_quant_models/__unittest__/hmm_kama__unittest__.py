@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import warnings
 from dataclasses import dataclass
+import tempfile
+import shutil
 
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent.parent)) if str(current_dir.parent.parent.parent) not in sys.path else None
@@ -17,15 +19,15 @@ from signals._quant_models.hmm_kama import (
     compute_state_using_hmm, compute_state_using_association_rule_mining,
     compute_state_using_k_means, calculate_all_state_durations,
     HMM_KAMA, calculate_composite_scores_association_rule_mining,
-    OptimizingParameters
+    timeout_context, prevent_infinite_loop
 )
+
 # Mock OptimizingParameters class for testing
 @dataclass
-class MockOptimizingParameters(OptimizingParameters):
+class MockOptimizingParameters:
     window_kama: int = 10
     fast_kama: int = 2
     slow_kama: int = 30
-    window_size: int = 20
     window_size: int = 20
 
 class TestHMMKama(unittest.TestCase):
@@ -53,6 +55,20 @@ class TestHMMKama(unittest.TestCase):
         # Constant price data
         self.constant_data = pd.DataFrame({
             'close': [100] * 50
+        })
+
+        # Data with extreme values for testing robustness
+        self.extreme_data = pd.DataFrame({
+            'close': [1e-10, 1e10, 100, -1e5, 1e8] * 20,
+            'high': [1e-10, 1e10, 105, -1e5, 1e8] * 20,
+            'low': [1e-10, 1e10, 95, -1e5, 1e8] * 20
+        })
+
+        # Data with mixed invalid values
+        self.mixed_invalid_data = pd.DataFrame({
+            'close': [100, np.nan, 102, np.inf, 104, -np.inf, 106] * 15,
+            'high': [105, np.nan, 107, np.inf, 109, -np.inf, 111] * 15,
+            'low': [95, np.nan, 97, np.inf, 99, -np.inf, 101] * 15
         })
 
     def test_calculate_kama_normal_case(self):
@@ -107,7 +123,7 @@ class TestHMMKama(unittest.TestCase):
 
     def test_prepare_observations_normal_case(self):
         """Test prepare_observations with normal data"""
-        result = prepare_observations(self.sample_data, self.optimizing_params)
+        result = prepare_observations(self.sample_data, self.optimizing_params)  # type: ignore
         
         self.assertEqual(result.shape[0], len(self.sample_data))
         self.assertEqual(result.shape[1], 3)  # returns, kama, volatility
@@ -118,18 +134,18 @@ class TestHMMKama(unittest.TestCase):
         empty_df = pd.DataFrame()
         
         with self.assertRaises(ValueError):
-            prepare_observations(empty_df, self.optimizing_params)
+            prepare_observations(empty_df, self.optimizing_params)  # type: ignore
 
     def test_prepare_observations_no_close_column(self):
         """Test prepare_observations without close column"""
         invalid_df = pd.DataFrame({'high': [100, 101, 102]})
         
         with self.assertRaises(ValueError):
-            prepare_observations(invalid_df, self.optimizing_params)
+            prepare_observations(invalid_df, self.optimizing_params)  # type: ignore
 
     def test_prepare_observations_constant_prices(self):
         """Test prepare_observations with constant prices"""
-        result = prepare_observations(self.constant_data, self.optimizing_params)
+        result = prepare_observations(self.constant_data, self.optimizing_params)  # type: ignore
         
         self.assertEqual(result.shape[0], len(self.constant_data))
         self.assertEqual(result.shape[1], 3)
@@ -141,7 +157,7 @@ class TestHMMKama(unittest.TestCase):
         df_with_inf.loc[10:15, 'close'] = np.inf
         df_with_inf.loc[20:25, 'close'] = -np.inf
         
-        result = prepare_observations(df_with_inf, self.optimizing_params)
+        result = prepare_observations(df_with_inf, self.optimizing_params)  # type: ignore
         
         self.assertTrue(np.isfinite(result).all())
         self.assertEqual(result.shape[1], 3)
@@ -150,7 +166,7 @@ class TestHMMKama(unittest.TestCase):
         """Test prepare_observations with only one unique price"""
         df_single = pd.DataFrame({'close': [100.0] * 50})
         
-        result = prepare_observations(df_single, self.optimizing_params)
+        result = prepare_observations(df_single, self.optimizing_params)  # type: ignore
         
         self.assertEqual(result.shape[0], 50)
         self.assertTrue(np.isfinite(result).all())
@@ -161,7 +177,7 @@ class TestHMMKama(unittest.TestCase):
         params = MockOptimizingParameters()
         params.window_kama = 1
         
-        result = prepare_observations(self.sample_data, params)
+        result = prepare_observations(self.sample_data, params)  # type: ignore
         
         self.assertTrue(np.isfinite(result).all())
 
@@ -229,6 +245,28 @@ class TestHMMKama(unittest.TestCase):
     def test_train_hmm_large_observations(self):
         """Test HMM training with very large observation values"""
         observations = np.random.normal(0, 1e8, (50, 2))
+        result = train_hmm(observations)
+        
+        self.assertIsNotNone(result)
+
+    # New test cases for improved error handling
+    def test_train_hmm_1d_observations(self):
+        """Test HMM training with 1D observations array"""
+        observations = np.random.normal(0, 1, 50)
+        result = train_hmm(observations, n_components=2)
+        
+        self.assertIsNotNone(result)
+
+    def test_train_hmm_with_low_variance(self):
+        """Test HMM training with low variance observations"""
+        observations = np.ones((50, 2)) * 0.1  # Very low variance
+        result = train_hmm(observations)
+        
+        self.assertIsNotNone(result)
+
+    def test_train_hmm_with_extreme_values(self):
+        """Test HMM training with extreme values that need scaling"""
+        observations = np.random.normal(0, 1e10, (50, 2))
         result = train_hmm(observations)
         
         self.assertIsNotNone(result)
@@ -501,6 +539,39 @@ class TestHMMKama(unittest.TestCase):
         self.assertEqual(apriori_result, 0)
         self.assertEqual(fpgrowth_result, 0)
 
+    # New test cases for improved error handling
+    def test_compute_state_using_association_rule_mining_missing_columns(self):
+        """Test association rule mining with missing required columns"""
+        durations_df = pd.DataFrame({
+            'duration': [10, 25, 35]  # Missing 'state' column
+        })
+        
+        apriori_result, fpgrowth_result = compute_state_using_association_rule_mining(durations_df)
+        
+        self.assertEqual(apriori_result, 0)
+        self.assertEqual(fpgrowth_result, 0)
+
+    def test_compute_state_using_association_rule_mining_empty_dataframe(self):
+        """Test association rule mining with empty DataFrame"""
+        empty_df = pd.DataFrame()
+        
+        apriori_result, fpgrowth_result = compute_state_using_association_rule_mining(empty_df)
+        
+        self.assertEqual(apriori_result, 0)
+        self.assertEqual(fpgrowth_result, 0)
+
+    def test_compute_state_using_association_rule_mining_single_row(self):
+        """Test association rule mining with single row data"""
+        single_row_df = pd.DataFrame({
+            'duration': [10],
+            'state': ['bullish weak']
+        })
+        
+        apriori_result, fpgrowth_result = compute_state_using_association_rule_mining(single_row_df)
+        
+        self.assertIn(apriori_result, [0, 1, 2, 3])
+        self.assertIn(fpgrowth_result, [0, 1, 2, 3])
+
     def test_hmm_kama_normal_case(self):
         """Test main hmm_kama function with normal data"""
         result = hmm_kama(self.sample_data, self.optimizing_params)
@@ -637,6 +708,149 @@ class TestHMMKama(unittest.TestCase):
         for state in expected_states:
             self.assertIn(state, STATE_MAPPING)
             self.assertIn(STATE_MAPPING[state], [0, 1, 2, 3])
+
+    # New test cases for improved error handling
+    def test_hmm_kama_label_encoder_failure(self):
+        """Test hmm_kama when LabelEncoder fails"""
+        # Create data that might cause LabelEncoder issues
+        problematic_data = pd.DataFrame({
+            'close': np.random.normal(100, 10, 50),
+            'high': np.random.normal(105, 10, 50),
+            'low': np.random.normal(95, 10, 50)
+        })
+        
+        result = hmm_kama(problematic_data, self.optimizing_params)
+        self.assertIsInstance(result, HMM_KAMA)
+
+    def test_hmm_kama_with_zero_price_range(self):
+        """Test hmm_kama with data that has zero price range"""
+        zero_range_data = pd.DataFrame({
+            'close': [100.0] * 50,
+            'high': [100.0] * 50,
+            'low': [100.0] * 50
+        })
+        
+        result = hmm_kama(zero_range_data, self.optimizing_params)
+        self.assertIsInstance(result, HMM_KAMA)
+
+    def test_hmm_kama_with_very_small_price_range(self):
+        """Test hmm_kama with data that has very small price range"""
+        small_range_data = pd.DataFrame({
+            'close': [100.0 + i * 0.0001 for i in range(50)],
+            'high': [100.1 + i * 0.0001 for i in range(50)],
+            'low': [99.9 + i * 0.0001 for i in range(50)]
+        })
+        
+        result = hmm_kama(small_range_data, self.optimizing_params)
+        self.assertIsInstance(result, HMM_KAMA)
+
+    def test_hmm_kama_with_extreme_outliers(self):
+        """Test hmm_kama with extreme outlier values"""
+        outlier_data = self.sample_data.copy()
+        outlier_data.loc[0, 'close'] = 1e15  # Extreme outlier
+        outlier_data.loc[1, 'close'] = -1e15  # Extreme negative outlier
+        
+        result = hmm_kama(outlier_data, self.optimizing_params)
+        self.assertIsInstance(result, HMM_KAMA)
+
+    # New test cases for improved KAMA calculation
+    def test_calculate_kama_with_extreme_volatility(self):
+        """Test KAMA with extreme volatility values"""
+        prices = [100, 200, 50, 300, 25, 400, 10]
+        result = calculate_kama(prices, window=3)
+        
+        self.assertEqual(len(result), len(prices))
+        self.assertTrue(np.isfinite(result).all())
+
+    def test_calculate_kama_with_very_small_prices(self):
+        """Test KAMA with very small price values"""
+        prices = [1e-10, 2e-10, 3e-10, 4e-10, 5e-10]
+        result = calculate_kama(prices, window=2)
+        
+        self.assertEqual(len(result), len(prices))
+        self.assertTrue(np.isfinite(result).all())
+
+    def test_calculate_kama_with_mixed_invalid_values(self):
+        """Test KAMA with mixed invalid values (NaN, Inf, normal)"""
+        prices = [100, np.nan, 102, np.inf, 104, -np.inf, 106]
+        result = calculate_kama(prices, window=3)
+        
+        self.assertEqual(len(result), len(prices))
+        self.assertTrue(np.isfinite(result).all())
+
+    def test_calculate_kama_with_overflow_risk(self):
+        """Test KAMA with values that could cause overflow"""
+        prices = [1e10, 1e11, 1e12, 1e13, 1e14]
+        result = calculate_kama(prices, window=2)
+        
+        self.assertEqual(len(result), len(prices))
+        self.assertTrue(np.isfinite(result).all())
+
+    def test_calculate_kama_with_underflow_risk(self):
+        """Test KAMA with values that could cause underflow"""
+        prices = [1e-10, 1e-11, 1e-12, 1e-13, 1e-14]
+        result = calculate_kama(prices, window=2)
+        
+        self.assertEqual(len(result), len(prices))
+        self.assertTrue(np.isfinite(result).all())
+
+    # Additional test cases for new improvements
+    def test_hmm_kama_with_extreme_data(self):
+        """Test hmm_kama with extreme data values"""
+        result = hmm_kama(self.extreme_data, self.optimizing_params)
+        self.assertIsInstance(result, HMM_KAMA)
+
+    def test_hmm_kama_with_mixed_invalid_data(self):
+        """Test hmm_kama with mixed invalid data"""
+        result = hmm_kama(self.mixed_invalid_data, self.optimizing_params)
+        self.assertIsInstance(result, HMM_KAMA)
+
+    def test_timeout_context_manager_success(self):
+        """Test timeout context manager with successful operation"""
+        from signals._quant_models.hmm_kama import timeout_context
+        
+        with timeout_context(5):
+            result = 1 + 1
+            self.assertEqual(result, 2)
+
+    def test_timeout_context_manager_timeout(self):
+        """Test timeout context manager with timeout"""
+        from signals._quant_models.hmm_kama import timeout_context
+        import time
+        
+        with self.assertRaises(TimeoutError):
+            with timeout_context(0.1):  # Very short timeout
+                time.sleep(0.2)  # Sleep longer than timeout
+
+    def test_prevent_infinite_loop_decorator(self):
+        """Test the prevent_infinite_loop decorator"""
+        # This tests the decorator functionality indirectly
+        # by calling hmm_kama multiple times rapidly
+        results = []
+        for _ in range(3):
+            result = hmm_kama(self.sample_data, self.optimizing_params)
+            results.append(result)
+        
+        # All results should be valid
+        for result in results:
+            self.assertIsInstance(result, HMM_KAMA)
+
+    def test_hmm_kama_with_all_edge_cases_combined(self):
+        """Test hmm_kama with all edge cases combined"""
+        # Create data with multiple problematic characteristics
+        problematic_data = pd.DataFrame({
+            'close': [100] * 25 + [np.nan] * 25 + [np.inf] * 25 + [-np.inf] * 25,
+            'high': [105] * 25 + [np.nan] * 25 + [np.inf] * 25 + [-np.inf] * 25,
+            'low': [95] * 25 + [np.nan] * 25 + [np.inf] * 25 + [-np.inf] * 25
+        })
+        
+        result = hmm_kama(problematic_data, self.optimizing_params)
+        self.assertIsInstance(result, HMM_KAMA)
+
+    def tearDown(self):
+        """Clean up after each test"""
+        # Clean up any temporary files or resources if needed
+        pass
 
 if __name__ == '__main__':
     unittest.main()

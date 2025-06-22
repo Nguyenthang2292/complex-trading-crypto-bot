@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import NamedTuple
 
 @dataclass
 class OptimizingParameters:
@@ -49,4 +50,35 @@ class OptimizingParameters:
             raise ValueError("lot_size_ratio must be > 0")
         if self.take_profit_pct <= 0 or self.stop_loss_pct <= 0:
             raise ValueError("Profit/loss percentages must be > 0")
+        
+
+class HMMHighOrderResult(NamedTuple):
+    """
+    Represents the output of the high-order Hidden Markov Model analysis.
+
+    Attributes:
+        next_state_with_high_order_hmm: The predicted next market state.
+        next_state_probability: The probability associated with the prediction.
+    """
+    next_state_with_high_order_hmm: int
+    next_state_probability: float
+
+class HMMKamaResult(NamedTuple):
+    """
+    Represents the output of the HMM-KAMA model analysis.
+
+    Attributes:
+        next_state_with_hmm_kama: The primary predicted next state from HMM-KAMA.
+        current_state_of_state_using_std: Market state derived from volatility.
+        current_state_of_state_using_hmm: Market state derived from HMM.
+        current_state_of_state_using_kmeans: Market state derived from clustering.
+        state_high_probabilities_using_arm_apriori: State confirmed by Apriori.
+        state_high_probabilities_using_arm_fpgrowth: State confirmed by FP-Growth.
+    """
+    next_state_with_hmm_kama: int
+    current_state_of_state_using_std: int
+    current_state_of_state_using_hmm: int
+    current_state_of_state_using_kmeans: int
+    state_high_probabilities_using_arm_apriori: int
+    state_high_probabilities_using_arm_fpgrowth: int
         

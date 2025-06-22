@@ -75,12 +75,14 @@ def calculate_kama(prices, window: int = 10, fast: int = 2, slow: int = 30) -> n
             price_diff = np.clip(prices_array[i] - kama[i - 1], -1e10, 1e10) if abs(prices_array[i] - kama[i - 1]) > 1e10 else prices_array[i] - kama[i - 1]
             kama[i] = kama[i - 1] + sc * price_diff
             
+            # Additional safety check for NaN/Inf values
             if np.isnan(kama[i]) or np.isinf(kama[i]):
                 kama[i] = kama[i - 1]
-                
+            
     except Exception as e:
         logger.warning(f"Error in KAMA calculation: {e}. Using simple moving average fallback.")
-        kama = pd.Series(prices).rolling(window=window, min_periods=1).mean().ffill().values
+        kama_series = pd.Series(prices).rolling(window=window, min_periods=1).mean()
+        kama = kama_series.ffill().values  # type: ignore
     
     kama_array = np.asarray(kama, dtype=np.float64)
     return np.where(~np.isfinite(kama_array), initial_value, kama_array).astype(np.float64)
@@ -91,7 +93,7 @@ def prepare_observations(data: pd.DataFrame, optimizing_params: OptimizingParame
         raise ValueError(f"Invalid data: empty={data.empty}, has close={'close' in data.columns}, len={len(data)}")
     
     close_prices = data["close"].replace([np.inf, -np.inf], np.nan).ffill().bfill()
-    if close_prices.isna().any():
+    if close_prices.isna().any().any():  # type: ignore
         close_prices = close_prices.fillna(close_prices.median())
 
     price_range = close_prices.max() - close_prices.min()
@@ -102,6 +104,11 @@ def prepare_observations(data: pd.DataFrame, optimizing_params: OptimizingParame
         close_prices = pd.Series(np.linspace(close_prices.mean() * 0.95, close_prices.mean() * 1.05, len(close_prices)))
         price_range = close_prices.max() - close_prices.min()
 
+    # Ensure price_range is not zero to avoid division by zero
+    if price_range <= 0:
+        price_range = 1.0
+        close_prices = pd.Series(np.linspace(45, 55, len(close_prices)))
+    
     close_prices = ((close_prices - close_prices.min()) / price_range * 100) if price_range > 0 else pd.Series(np.linspace(45, 55, len(close_prices)))
     close_prices_array = close_prices.values.astype(np.float64)
 
@@ -169,6 +176,10 @@ def train_hmm(observations: np.ndarray, n_components: int = 4, n_iter: int = 10,
     """Train HMM with robust error handling and data validation"""
     if observations.size == 0:
         raise ValueError("Empty observations array")
+    
+    # Ensure observations is 2D
+    if observations.ndim == 1:
+        observations = observations.reshape(-1, 1)
         
     n_features = observations.shape[1] if len(observations.shape) > 1 else 1
         
@@ -331,7 +342,7 @@ def calculate_composite_scores_association_rule_mining(rules: pd.DataFrame) -> p
     for col in numeric_cols:
         if col in rules.columns:
             rules[col] = rules[col].replace([np.inf, -np.inf], np.nan)
-            fill_value = rules[col].median() if rules[col].notna().any() else 0.0
+            fill_value = rules[col].median() if rules[col].notna().any().any() else 0.0  # type: ignore
             rules[col] = rules[col].fillna(fill_value)
     
     metrics = [m for m in ['antecedent support', 'consequent support', 'support', 'confidence',
@@ -366,6 +377,15 @@ def calculate_composite_scores_association_rule_mining(rules: pd.DataFrame) -> p
 
 def compute_state_using_association_rule_mining(durations: pd.DataFrame) -> Tuple[int, int]:
     """Perform association rule mining on the durations DataFrame."""
+    # Check if required columns exist
+    if 'state' not in durations.columns or 'duration' not in durations.columns:
+        logger.warning("Missing required columns 'state' or 'duration' in durations DataFrame")
+        return 0, 0
+    
+    if durations.empty:
+        logger.warning("Empty durations DataFrame")
+        return 0, 0
+    
     bins, labels = [0, 15, 30, 100], ['state_1', 'state_2', 'state_3']
     durations['duration_bin'] = pd.cut(durations['duration'], bins=bins, labels=labels, right=False)
     durations['transaction'] = durations[['state', 'duration_bin']].apply(
@@ -407,7 +427,7 @@ def compute_state_using_association_rule_mining(durations: pd.DataFrame) -> Tupl
     rules_fpgrowth = pd.DataFrame()
     if not frequent_itemsets_fpgrowth.empty:
         try:
-            rules_fpgrowth = association_rules(frequent_itemsets_fpgrowth, metric="confidence", min_threshold=0.6)
+            rules_fpgrowth = association_rules(frequent_itemsets_fpgrowth, metric="confidence", min_threshold=0.6)  # type: ignore
         except Exception as e:
             logger.warning(f"Error generating association rules for FP-Growth: {e}")
             
@@ -448,11 +468,13 @@ def calculate_all_state_durations(data: pd.DataFrame) -> pd.DataFrame:
     df = data.copy()
     df['group'] = (df['state'] != df['state'].shift()).cumsum()
     
-    return df.groupby('group').agg(
+    result = df.groupby('group').agg(
         state=('state', 'first'),
         start_time=('state', lambda s: s.index[0]),
         duration=('state', 'size')
     ).reset_index(drop=True)
+    
+    return result  # type: ignore
     
 STATE_MAPPING = {
     "bearish weak": 0,
@@ -533,7 +555,11 @@ def hmm_kama(df, optimizing_params):
             if all_duration['state'].nunique() <= 1:
                 all_duration['state_encoded'] = 0            
             else:
-                all_duration['state_encoded'] = LabelEncoder().fit_transform(all_duration['state'])
+                try:
+                    all_duration['state_encoded'] = LabelEncoder().fit_transform(all_duration['state'])
+                except Exception as e:
+                    logger.warning(f"LabelEncoder failed: {e}. Using default encoding.")
+                    all_duration['state_encoded'] = 0
                 
             all_duration, last_hidden_state = compute_state_using_hmm(all_duration)
             hmm_kama_result.current_state_of_state_using_hmm = cast(Literal[0, 1], min(1, max(0, last_hidden_state)))
@@ -546,6 +572,9 @@ def hmm_kama(df, optimizing_params):
             
             return hmm_kama_result
         
+    except TimeoutError:
+        logger.error("HMM KAMA calculation timed out after 30 seconds")
+        return HMM_KAMA(0, 0, 0, 0, 0, 0)
     except Exception as e:
         logger.error(f"Error in hmm_kama: {str(e)}")
         return HMM_KAMA(0, 0, 0, 0, 0, 0)

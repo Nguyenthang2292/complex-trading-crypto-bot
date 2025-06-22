@@ -1,3 +1,30 @@
+"""
+Best Performance Symbols Analysis Module
+
+This module provides comprehensive analysis of cryptocurrency symbols across multiple
+timeframes to identify top-performing pairs for both LONG and SHORT trading signals.
+
+Key Features:
+- Multi-timeframe performance analysis (1h, 4h, 1d)
+- Composite scoring system for symbol ranking
+- Support for both LONG and SHORT signal identification
+- Volume filtering and stablecoin exclusion
+- Comprehensive logging and progress tracking
+- Statistical analysis and performance metrics
+
+Main Functions:
+- signal_best_performance_symbols: Main analysis function
+- get_top_performers_by_timeframe: Extract top performers for specific timeframe
+- get_worst_performers_by_timeframe: Extract worst performers for SHORT signals
+- get_short_signal_candidates: Get SHORT signal candidates based on scores
+- logging_performance_summary: Display formatted analysis results
+
+Dependencies:
+- PerformanceAnalyzer: For calculating performance metrics
+- tick_processor: For data access and symbol management
+- pandas, numpy: For data manipulation and calculations
+"""
+
 import logging
 import numpy as np
 import os
@@ -5,13 +32,13 @@ import sys
 import pandas as pd
 from datetime import datetime, timezone
 from tqdm import tqdm
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple, Union
 
 # Add the parent directory to sys.path to allow importing modules from sibling directories
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from components.tick_processor import tick_processor
-from components.config import (DEFAULT_TIMEFRAMES,DEFAULT_TOP_SYMBOLS,MIN_DATA_POINTS)
+from components.tick_processor import TickProcessor
+from components.config import (DEFAULT_TIMEFRAMES, DEFAULT_TOP_SYMBOLS, MIN_DATA_POINTS)
 from signals._components.BestPerformanceSymbols__class__PerformanceAnalyzer import PerformanceAnalyzer
 from utilities._logger import setup_logging
 
@@ -19,504 +46,412 @@ from utilities._logger import setup_logging
 logger = setup_logging(module_name="signals_best_performance_symbols", log_level=logging.DEBUG)
 
 def _validate_inputs(
-    symbols: Optional[List[str]], 
-    timeframes: Optional[List[str]], 
-    performance_period: int, 
-    top_percentage: float, 
+    symbols: Optional[List[str]],
+    timeframes: Optional[List[str]],
+    performance_period: int,
+    top_percentage: float,
     worst_percentage: float
-    ) -> bool:
-    """
-    Validate input parameters for performance analysis.
-    
+) -> bool:
+    """Validates the input parameters for the performance analysis.
+
     Args:
-        symbols: Optional list of trading symbols
-        timeframes: Optional list of timeframes to analyze
-        performance_period: Number of periods for performance calculation
-        top_percentage: Percentage of top performers to select (0-1)
-        worst_percentage: Percentage of worst performers to select (0-1)
-        
+        symbols: An optional list of trading symbols.
+        timeframes: An optional list of timeframes to analyze.
+        performance_period: The number of periods for performance calculation.
+        top_percentage: The percentage of top performers to select (0 to 1).
+        worst_percentage: The percentage of worst performers to select (0 to 1).
+
     Returns:
-        bool: True if all inputs are valid, False otherwise
+        True if all inputs are valid, False otherwise.
     """
     if performance_period <= 0:
-        logger.error(f"Invalid performance_period: {performance_period}. Must be > 0")
+        logger.error(f"Invalid performance_period: {performance_period}. Must be > 0.")
         return False
-    
-    if not (0 < top_percentage <= 1):
-        logger.error(f"Invalid top_percentage: {top_percentage}. Must be between 0 and 1")
+    if not 0 < top_percentage <= 1:
+        logger.error(f"Invalid top_percentage: {top_percentage}. Must be between 0 and 1.")
         return False
-    
-    if not (0 < worst_percentage <= 1):
-        logger.error(f"Invalid worst_percentage: {worst_percentage}. Must be between 0 and 1")
+    if not 0 < worst_percentage <= 1:
+        logger.error(f"Invalid worst_percentage: {worst_percentage}. Must be between 0 and 1.")
         return False
-    
-    if symbols is not None and len(symbols) == 0:
-        logger.error("Empty symbols list provided")
+    if symbols is not None and not symbols:
+        logger.error("Input 'symbols' list cannot be empty.")
         return False
-    
-    if timeframes is not None and len(timeframes) == 0:
-        logger.error("Empty timeframes list provided")
+    if timeframes is not None and not timeframes:
+        logger.error("Input 'timeframes' list cannot be empty.")
         return False
-    
     return True
 
 def _prepare_symbols(
-    processor: Optional[tick_processor], 
-    symbols: Optional[List[str]] = None, 
+    processor: TickProcessor,
+    symbols: Optional[List[str]] = None,
     exclude_stable_coins: bool = True
-    ) -> List[str]:
-    """
-    Prepare and filter symbol list, optionally excluding stablecoins.
-    
+) -> List[str]:
+    """Prepares and filters the list of symbols for analysis.
+
+    If no symbols are provided, it fetches all USDT pairs. It can also
+    filter out stablecoins.
+
     Args:
-        processor: tick_processor instance
-        symbols: List of symbols to analyze (if None, gets all USDT pairs)
-        exclude_stable_coins: Whether to exclude stablecoins from analysis
-        
+        processor: An instance of the TickProcessor to fetch symbol data.
+        symbols: An optional list of symbols to process.
+        exclude_stable_coins: If True, stablecoins are removed from the list.
+
     Returns:
-        Filtered list of symbols
+        A filtered list of symbols.
     """
     if symbols is None:
-        if processor is not None:
-            symbols = processor.get_symbols_list_by_quote_usdt()
-        else:
-            logger.error("Processor is None; cannot retrieve symbols.")
-            return []
+        logger.info("No symbols provided, fetching all USDT pairs...")
+        symbols = processor.get_symbols_list_by_quote_asset('USDT')
     
-    if exclude_stable_coins and symbols:
-        stable_coins = {'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'PAXG', 'USDP'}
+    if not symbols:
+        logger.warning("No symbols were provided or could be retrieved.")
+        return []
+    
+    if exclude_stable_coins:
+        stable_coins = {'USDC', 'BUSD', 'DAI', 'TUSD', 'PAXG', 'USDP'}
         initial_count = len(symbols)
         
-        symbols = [
-            symbol for symbol in symbols 
-            if (symbol[:-4] if symbol.endswith('USDT') else symbol) not in stable_coins
-        ]
+        # Assumes symbols are in 'BASEQUOTE' format, e.g., 'BTCUSDT'
+        symbols = [s for s in symbols if not any(stable in s for stable in stable_coins)]
         
-        logger.success(f"Filtered out stablecoins: {initial_count} -> {len(symbols)} symbols")
+        logger.info(f"Filtered out stablecoins: {initial_count} -> {len(symbols)} symbols.")
     
     return symbols
 
 def _analyze_timeframe_performance(
     analyzer: PerformanceAnalyzer,
     symbol_data: Dict[str, Dict[str, pd.DataFrame]],
-    timeframe: str, 
+    timeframe: str,
     performance_period: int,
-    min_volume_usdt: float, 
-    analyze_for_short: bool = True
-    ) -> Dict[str, any]:
-    """
-    Analyze performance metrics for symbols in a specific timeframe.
-    
+    min_volume_usdt: float
+) -> Dict[str, Any]:
+    """Analyzes performance metrics for all symbols within a single timeframe.
+
     Args:
-        analyzer: PerformanceAnalyzer instance for metrics calculation
-        symbol_data: Dictionary mapping symbols to their timeframe data
-        timeframe: Timeframe to analyze ('1h', '4h', '1d', etc.)
-        performance_period: Number of periods for performance calculation
-        min_volume_usdt: Minimum volume threshold in USDT
-        analyze_for_short: Whether to analyze for short signals
-        
+        analyzer: An instance of the PerformanceAnalyzer.
+        symbol_data: A dictionary mapping symbols to their timeframe data.
+        timeframe: The timeframe to analyze (e.g., '1h', '4h').
+        performance_period: The number of periods for performance calculation.
+        min_volume_usdt: The minimum average daily volume in USDT to consider a symbol.
+
     Returns:
-        Dictionary containing timeframe analysis results and statistics
+        A dictionary containing the analysis results for the timeframe.
     """
-    try:
-        logger.analysis(f"Analyzing {len(symbol_data)} symbols for {timeframe} timeframe...")
-        
-        symbol_metrics = []
-        stats = {'processed': 0, 'no_timeframe': 0, 'insufficient_data': 0, 'low_volume': 0}
-        total_symbols = len(symbol_data)
-        min_required_data = max(performance_period, MIN_DATA_POINTS)
-        
-        with tqdm(total=total_symbols, desc=f"Analyzing {timeframe}", unit="symbol", ncols=100,
-                  bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]") as pbar:
-            
-            for symbol, timeframe_data in symbol_data.items():
-                try:
-                    if timeframe not in timeframe_data:
-                        stats['no_timeframe'] += 1
-                        continue
-                    
-                    df = timeframe_data[timeframe]
-                    
-                    if df is None or df.empty or len(df) < min_required_data:
-                        stats['insufficient_data'] += 1
-                        continue
-                    
-                    metrics = analyzer.calculate_performance_metrics(df, symbol, timeframe, performance_period)
-                    
-                    if metrics['avg_volume_usdt'] < min_volume_usdt:
-                        stats['low_volume'] += 1
-                        continue
-                    
+    logger.info(f"Analyzing {len(symbol_data)} symbols for timeframe: {timeframe}...")
+    symbol_metrics = []
+    stats = {'processed': 0, 'no_data': 0, 'insufficient_data': 0, 'low_volume': 0}
+    min_required_data = max(performance_period, MIN_DATA_POINTS)
+    
+    with tqdm(total=len(symbol_data), desc=f"Analyzing {timeframe}", unit="symbol") as pbar:
+        for symbol, tf_data in symbol_data.items():
+            df = tf_data.get(timeframe)
+            if df is None or df.empty:
+                stats['no_data'] += 1
+            elif len(df) < min_required_data:
+                stats['insufficient_data'] += 1
+            else:
+                metrics = analyzer.calculate_performance_metrics(df, symbol, timeframe, performance_period)
+                if metrics.get('avg_volume_usdt', 0) < min_volume_usdt:
+                    stats['low_volume'] += 1
+                else:
                     symbol_metrics.append(metrics)
                     stats['processed'] += 1
-                    
-                    pbar.set_postfix({
-                        "processed": stats['processed'], 
-                        "no_tf": stats['no_timeframe'],
-                        "low_vol": stats['low_volume']
-                    })
-                    
-                except Exception as e:
-                    logger.debug(f"Error processing {symbol} for {timeframe}: {e}")
-                finally:
-                    pbar.update(1)
-        
-        _log_timeframe_stats(timeframe, stats)
-        
-        symbol_metrics.sort(key=lambda x: x['composite_score'], reverse=True)
-        timeframe_stats = _calculate_timeframe_statistics(symbol_metrics, analyze_for_short)
-        
-        return {
-            'timeframe': timeframe,
-            'symbol_metrics': symbol_metrics,
-            'statistics': timeframe_stats
-        }
-        
-    except Exception as e:
-        logger.error(f"Error analyzing timeframe {timeframe}: {e}")
-        return {
-            'timeframe': timeframe,
-            'symbol_metrics': [],
-            'statistics': {'symbols_processed': 0}
-        }
-      
-def _log_timeframe_stats(timeframe: str, stats: Dict[str, int]) -> None:
-    """Log timeframe processing statistics."""
-    logger.performance(f"Timeframe {timeframe} results:")
-    logger.performance(f"  - Processed successfully: {stats['processed']}")
-    logger.performance(f"  - Skipped (no timeframe data): {stats['no_timeframe']}")
-    logger.performance(f"  - Skipped (insufficient data): {stats['insufficient_data']}")
-    logger.performance(f"  - Skipped (low volume): {stats['low_volume']}")
-
-def _calculate_timeframe_statistics(symbol_metrics: List[Dict], analyze_for_short: bool) -> Dict[str, any]:
-    """
-    Calculate comprehensive statistics for a timeframe's symbol metrics.
+            pbar.update(1)
+            
+    _log_timeframe_stats(timeframe, stats)
     
+    symbol_metrics.sort(key=lambda x: x.get('composite_score', 0), reverse=True)
+    timeframe_stats = _calculate_timeframe_statistics(symbol_metrics)
+    
+    return {
+        'timeframe': timeframe,
+        'symbol_metrics': symbol_metrics,
+        'statistics': timeframe_stats
+    }
+
+def _log_timeframe_stats(timeframe: str, stats: Dict[str, int]) -> None:
+    """Logs the summary statistics for a timeframe's analysis."""
+    logger.info(f"Timeframe '{timeframe}' analysis summary:")
+    logger.info(f"  - Symbols processed successfully: {stats['processed']}")
+    logger.info(f"  - Skipped (no data for timeframe): {stats['no_data']}")
+    logger.info(f"  - Skipped (insufficient data points): {stats['insufficient_data']}")
+    logger.info(f"  - Skipped (volume too low): {stats['low_volume']}")
+
+def _calculate_timeframe_statistics(symbol_metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calculates summary statistics for a list of symbol metrics.
+
     Args:
-        symbol_metrics: List of dictionaries containing symbol performance metrics
-        analyze_for_short: Whether to include short signal analysis statistics
-        
+        symbol_metrics: A list of dictionaries, each containing performance metrics
+                        for a single symbol.
+
     Returns:
-        Dictionary containing statistical summary of timeframe performance
+        A dictionary containing the aggregated statistical summary.
     """
     if not symbol_metrics:
-        return {
-            'symbols_processed': 0,
-            'avg_score': 0.0,
-            'median_score': 0.0,
-            'avg_return': 0.0,
-            'avg_volatility': 0.0,
-            'avg_short_score': 0.0,
-            'top_performer': None,
-            'worst_performer': None
-        }
-    
-    scores = [metric['composite_score'] for metric in symbol_metrics]
-    returns = [metric['total_return'] for metric in symbol_metrics]
-    volatilities = [metric['volatility'] for metric in symbol_metrics]
+        return {'symbols_processed': 0}
+
+    df_metrics = pd.DataFrame(symbol_metrics)
     
     stats = {
-        'symbols_processed': len(symbol_metrics),
-        'avg_score': np.mean(scores),
-        'median_score': np.median(scores),
-        'avg_return': np.mean(returns),
-        'avg_volatility': np.mean(volatilities),
-        'top_performer': symbol_metrics[0],
-        'worst_performer': symbol_metrics[-1]
+        'symbols_processed': len(df_metrics),
+        'avg_score': df_metrics['composite_score'].mean(),
+        'median_score': df_metrics['composite_score'].median(),
+        'avg_return': df_metrics['return_over_period'].mean(),
+        'avg_volatility': df_metrics['volatility'].mean(),
+        'avg_sharpe_ratio': df_metrics['sharpe_ratio'].mean(),
+        'top_performer': df_metrics.iloc[0].to_dict() if not df_metrics.empty else None,
+        'worst_performer': df_metrics.iloc[-1].to_dict() if not df_metrics.empty else None
     }
-    
-    if analyze_for_short:
-        short_scores = [metric.get('short_composite_score', 0.0) for metric in symbol_metrics]
-        stats['avg_short_score'] = np.mean(short_scores)
-    else:
-        stats['avg_short_score'] = 0.0
-    
     return stats
 
 def _select_performers(
-    overall_scores: List[Dict],
+    overall_scores: List[Dict[str, Any]],
     top_percentage: float,
     worst_percentage: float,
     include_short_signals: bool
-) -> Tuple[List[Dict], List[Dict]]:
-    """Select top and worst performers based on specified percentages"""
-    num_top_performers = max(1, int(len(overall_scores) * top_percentage))
-    best_performers = overall_scores[:num_top_performers]
-    
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Selects the top and worst performing symbols based on scores.
+
+    Args:
+        overall_scores: A list of symbols with their aggregated performance scores.
+        top_percentage: The percentage of top performers to select.
+        worst_percentage: The percentage of worst performers to select for shorting.
+        include_short_signals: Flag to indicate if short candidates should be selected.
+
+    Returns:
+        A tuple containing two lists: the best performers for long signals and the
+        worst performers for short signals.
+    """
+    sorted_by_long = sorted(overall_scores, key=lambda x: x['long_score'], reverse=True)
+    num_top = int(len(sorted_by_long) * top_percentage)
+    best_performers = sorted_by_long[:num_top]
+
     worst_performers = []
     if include_short_signals:
-        num_worst_performers = max(1, int(len(overall_scores) * worst_percentage))
-        worst_performers = overall_scores[-num_worst_performers:]
-        worst_performers.reverse()
-        logger.signal(f"Selected {len(worst_performers)} worst performers for SHORT signals")
+        sorted_by_short = sorted(overall_scores, key=lambda x: x['short_score'], reverse=True)
+        num_worst = int(len(sorted_by_short) * worst_percentage)
+        worst_performers = sorted_by_short[:num_worst]
     
     return best_performers, worst_performers
 
 def _create_result_dict(
-    best_performers: List[Dict],
-    worst_performers: List[Dict],
-    timeframe_results: Dict,
+    best_performers: List[Dict[str, Any]],
+    worst_performers: List[Dict[str, Any]],
+    timeframe_results: Dict[str, Any],
     symbols: List[str],
-    timeframes: List[str],
-    top_percentage: float,
-    worst_percentage: float,
-    performance_period: int,
-    min_volume_usdt: float,
-    include_short_signals: bool
-) -> Dict:
-    """
-    Create comprehensive result dictionary with analysis summary and log results.
-    
+    timeframes: List[str]
+) -> Dict[str, Any]:
+    """Creates the final dictionary for the analysis results.
+
     Args:
-        best_performers: List of top performing symbols for LONG signals
-        worst_performers: List of worst performing symbols for SHORT signals
-        timeframe_results: Dictionary containing timeframe analysis results
-        symbols: List of symbols analyzed
-        timeframes: List of timeframes analyzed
-        top_percentage: Percentage of top performers selected
-        worst_percentage: Percentage of worst performers selected
-        performance_period: Number of periods for performance calculation
-        min_volume_usdt: Minimum volume threshold in USDT
-        include_short_signals: Whether SHORT signals were included
-        
+        best_performers: A list of the top-performing symbols.
+        worst_performers: A list of the worst-performing symbols.
+        timeframe_results: The detailed results for each analyzed timeframe.
+        symbols: The list of symbols that were analyzed.
+        timeframes: The list of timeframes that were analyzed.
+
     Returns:
-        Dictionary containing complete analysis results and metadata
+        A dictionary containing the complete analysis results.
     """
-    result = {
-        'best_performers': best_performers,
-        'worst_performers': worst_performers,
-        'timeframe_analysis': timeframe_results,
-        'summary': {
-            'total_symbols_analyzed': len(symbols),
-            'timeframes_analyzed': timeframes,
-            'top_performers_count': len(best_performers),
-            'worst_performers_count': len(worst_performers),
-            'top_percentage': top_percentage,
-            'short_percentage': worst_percentage,
-            'analysis_timestamp': datetime.now(timezone.utc).isoformat(),
-            'performance_period': performance_period,
-            'min_volume_usdt': min_volume_usdt,
-            'include_short_signals': include_short_signals
-        },
+    return {
+        "best_performers_long": best_performers,
+        "worst_performers_short": worst_performers,
+        "timeframe_analysis": timeframe_results,
+        "metadata": {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "symbols_analyzed_count": len(symbols),
+            "timeframes_analyzed": timeframes,
+        }
     }
-    
-    logger.success("Analysis complete!")
-    logger.signal(f"Top {len(best_performers)} performers for LONG signals:")
-    for i, performer in enumerate(best_performers[:5], 1):
-        logger.signal(f"  {i}. {performer['symbol']}: Score {performer['composite_score']:.4f}")
-    
-    if include_short_signals and worst_performers:
-        logger.signal(f"Bottom {len(worst_performers)} performers for SHORT signals:")
-        for i, performer in enumerate(worst_performers[:5], 1):
-            logger.signal(f"  {i}. {performer['symbol']}: Score {performer['composite_score']:.4f}")
-    
-    return result
-  
+
 def signal_best_performance_symbols(
-    processor: tick_processor,
+    processor: TickProcessor,
     symbols: Optional[List[str]] = None,
     timeframes: Optional[List[str]] = None,
     performance_period: int = 24,
     top_percentage: float = 0.3,
     include_short_signals: bool = True,
     worst_percentage: float = 0.3,
-    min_volume_usdt: float = 1000000,
+    min_volume_usdt: float = 1_000_000,
     exclude_stable_coins: bool = True,
-    preloaded_data: Optional[Dict[str, Dict[str, pd.DataFrame]]] = None) -> Dict:
+    preloaded_data: Optional[Dict[str, Dict[str, pd.DataFrame]]] = None
+) -> Dict[str, Any]:
     """
-    Analyze cryptocurrency symbols across multiple timeframes to identify top-performing pairs.
-    
+    Analyzes symbol performance across timeframes to find top candidates.
+
+    This is the main function that orchestrates the entire analysis pipeline,
+    from data fetching and validation to performance calculation and result aggregation.
+
     Args:
-        processor: tick_processor instance with Binance client
-        symbols: List of symbols to analyze (if None, uses all USDT pairs)
-        timeframes: List of timeframes to analyze (default: ['1h', '4h', '1d'])
-        performance_period: Number of periods to calculate performance over
-        top_percentage: Percentage of top performers to return for LONG signals
-        include_short_signals: Whether to include SHORT signal analysis
-        worst_percentage: Percentage of worst performers to return for SHORT signals
-        min_volume_usdt: Minimum 24h volume in USDT to consider
-        exclude_stable_coins: Whether to exclude stablecoins from analysis
-        preloaded_data: Pre-loaded data dictionary {symbol: {timeframe: dataframe}}
-        
+        processor: The TickProcessor instance for data fetching.
+        symbols: An optional list of symbols to analyze.
+        timeframes: An optional list of timeframes.
+        performance_period: The look-back period for performance calculation.
+        top_percentage: The percentage of top symbols to return for long signals.
+        include_short_signals: Whether to analyze for short signal candidates.
+        worst_percentage: The percentage of top symbols for short signals.
+        min_volume_usdt: The minimum required average volume in USDT.
+        exclude_stable_coins: Whether to filter out stablecoins.
+        preloaded_data: Optional preloaded market data to bypass fetching.
+
     Returns:
-        Dictionary containing analysis results for both LONG and SHORT signals
+        A dictionary containing the detailed analysis results, including top
+        long and short candidates and per-timeframe breakdowns.
     """
-    try:
-        logger.analysis("Starting best performance pairs analysis...")
-        
-        # Validate inputs
-        if not _validate_inputs(symbols, timeframes, performance_period, top_percentage, worst_percentage):
-            return {}
-        
-        analyzer = PerformanceAnalyzer()
-        timeframes = timeframes or [tf for tf in DEFAULT_TIMEFRAMES if tf in ['1h', '4h', '1d']]
-        symbols = _prepare_symbols(processor, symbols, exclude_stable_coins)
-        
-        if not symbols or not preloaded_data:
-            logger.error("No symbols found or preloaded data missing")
-            return {}
-        
-        logger.analysis(f"Analyzing {len(symbols)} symbols across timeframes: {timeframes}")
-        if include_short_signals:
-            logger.info(f"Finding top {top_percentage*100:.0f}% for LONG and bottom {worst_percentage*100:.0f}% for SHORT")
-        
-        timeframe_results = {}
-        symbol_scores = {}
-        
-        for tf in timeframes:
-            logger.analysis(f"Analyzing timeframe: {tf}")
-            timeframe_results[tf] = _analyze_timeframe_performance(
-                analyzer, preloaded_data, tf, performance_period, min_volume_usdt, include_short_signals
-            )
-            
-            for symbol_metrics in timeframe_results[tf]['symbol_metrics']:
-                symbol = symbol_metrics['symbol']
-                if symbol not in symbol_scores:
-                    symbol_scores[symbol] = {}
-                symbol_scores[symbol][tf] = symbol_metrics['composite_score']
-        
-        logger.analysis("Calculating composite scores across all timeframes...")
-        overall_scores = analyzer.calculate_overall_scores(symbol_scores, timeframes)
-        
-        best_performers, worst_performers = _select_performers(
-            overall_scores, top_percentage, worst_percentage, include_short_signals
-        )
-        
-        return _create_result_dict(
-            best_performers, worst_performers, timeframe_results, symbols, timeframes,
-            top_percentage, worst_percentage, performance_period, min_volume_usdt, include_short_signals
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in signal_best_performance_pairs: {e}")
+    timeframes = timeframes or DEFAULT_TIMEFRAMES
+    if not _validate_inputs(symbols, timeframes, performance_period, top_percentage, worst_percentage):
         return {}
 
-def get_top_performers_by_timeframe(analysis_result: Dict, timeframe: str, top_n: int = 10) -> List[Dict]:
-    """Extract top performers for a specific timeframe from analysis results."""
-    try:
-        timeframe_data = analysis_result.get('timeframe_analysis', {}).get(timeframe)
-        if not timeframe_data:
-            return []
-        
-        symbol_metrics = timeframe_data['symbol_metrics']
-        return symbol_metrics[:top_n]
-    
-    except Exception as e:
-        logger.error(f"Error extracting top performers for {timeframe}: {e}")
-        return []
+    symbols = _prepare_symbols(processor, symbols, exclude_stable_coins)
+    if not symbols:
+        return {}
 
-def get_worst_performers_by_timeframe(analysis_result: Dict, timeframe: str, top_n: int = 10) -> List[Dict]:
-    """Extract worst performers for a specific timeframe (for SHORT signals)."""
-    try:
-        timeframe_data = analysis_result.get('timeframe_analysis', {}).get(timeframe)
-        if not timeframe_data:
-            return []
-        
-        symbol_metrics = timeframe_data['symbol_metrics']
-        return symbol_metrics[-top_n:][::-1]
+    analyzer = PerformanceAnalyzer()
+    timeframe_results = {}
     
-    except Exception as e:
-        logger.error(f"Error extracting worst performers for {timeframe}: {e}")
-        return []
-
-def get_short_signal_candidates(analysis_result: Dict, min_short_score: float = 0.6) -> List[Dict]:
-    """Get symbols that are good candidates for SHORT signals based on SHORT composite score."""
-    try:
-        if not analysis_result:
-            logger.warning("Empty analysis result provided")
-            return []
+    if preloaded_data is None:
+        logger.info(f"No preloaded data. Fetching data for {len(symbols)} symbols...")
+        # This part should be replaced with a call to a data loading function
+        # For now, we assume data is loaded elsewhere or passed in.
+        # Example: preloaded_data = load_all_symbols_data(symbols, timeframes)
+        pass  # Placeholder for data loading logic
+    
+    if not preloaded_data:
+        logger.error("No data available for analysis, cannot proceed.")
+        return {}
+        
+    for tf in timeframes:
+        timeframe_results[tf] = _analyze_timeframe_performance(
+            analyzer, preloaded_data, tf, performance_period, min_volume_usdt
+        )
             
-        candidates = []
-        worst_performers = analysis_result.get('worst_performers', [])
-        
-        if not worst_performers:
-            logger.info("No worst performers found for SHORT signal analysis")
-            return []
-        
-        for performer in worst_performers:
-            timeframe_scores = performer.get('timeframe_scores', {})
-            short_scores = [
-                tf_data.get('short_composite_score', 0)
-                for tf_data in timeframe_scores.values()
-                if isinstance(tf_data, dict) and 'short_composite_score' in tf_data
-            ]
-            
-            if short_scores and np.mean(short_scores) >= min_short_score:
-                performer_copy = performer.copy()
-                performer_copy.update({
-                    'avg_short_score': np.mean(short_scores),
-                    'short_score_consistency': np.std(short_scores)
-                })
-                candidates.append(performer_copy)
-        
-        candidates.sort(key=lambda x: x.get('avg_short_score', 0), reverse=True)
-        logger.info(f"Found {len(candidates)} SHORT signal candidates with score >= {min_short_score}")
-        return candidates
-    
-    except Exception as e:
-        logger.error(f"Error getting SHORT signal candidates: {e}")
-        return []
+    overall_scores = analyzer.calculate_overall_scores(timeframe_results)
+    best, worst = _select_performers(overall_scores, top_percentage, worst_percentage, include_short_signals)
 
-def logging_performance_summary(analysis_result: Dict) -> None:
+    return _create_result_dict(best, worst, timeframe_results, symbols, timeframes)
+
+def get_top_performers_by_timeframe(
+    analysis_result: Dict[str, Any], timeframe: str, top_n: int = 10
+) -> List[Dict[str, Any]]:
     """
-    Print a formatted summary of the performance analysis including SHORT signals.
-    
+    Extracts the top N performing symbols for a specific timeframe.
+
     Args:
-        analysis_result: Dictionary containing analysis results with best/worst performers
+        analysis_result: The result dictionary from the main analysis function.
+        timeframe: The timeframe to get performers from.
+        top_n: The number of top performers to return.
+
+    Returns:
+        A list of the top N performing symbols for the given timeframe.
+    """
+    if timeframe not in analysis_result.get("timeframe_analysis", {}):
+        logger.warning(f"Timeframe '{timeframe}' not found in analysis results.")
+        return []
+        
+    metrics = analysis_result["timeframe_analysis"][timeframe].get("symbol_metrics", [])
+    return metrics[:top_n]
+
+def get_worst_performers_by_timeframe(
+    analysis_result: Dict[str, Any], timeframe: str, top_n: int = 10
+) -> List[Dict[str, Any]]:
+    """
+    Extracts the worst N performing symbols for a specific timeframe.
+
+    These are potential candidates for short signals.
+
+    Args:
+        analysis_result: The result dictionary from the main analysis function.
+        timeframe: The timeframe to get performers from.
+        top_n: The number of worst performers to return.
+
+    Returns:
+        A list of the worst N performing symbols for the given timeframe.
+    """
+    if timeframe not in analysis_result.get("timeframe_analysis", {}):
+        logger.warning(f"Timeframe '{timeframe}' not found in analysis results.")
+        return []
+
+    metrics = analysis_result["timeframe_analysis"][timeframe].get("symbol_metrics", [])
+    # Assumes metrics are sorted from best to worst, so worst are at the end
+    return metrics[-top_n:]
+
+def get_short_signal_candidates(
+    analysis_result: Dict[str, Any], min_short_score: float = 0.6
+) -> List[Dict[str, Any]]:
+    """
+    Filters and returns symbols that are strong candidates for short signals.
+
+    Args:
+        analysis_result: The result dictionary from the main analysis function.
+        min_short_score: The minimum short score required to be a candidate.
+
+    Returns:
+        A list of symbols that are strong candidates for shorting.
+    """
+    worst_performers = analysis_result.get("worst_performers_short", [])
+    if not worst_performers:
+        logger.info("No worst performers found to analyze for short signals.")
+        return []
+
+    candidates = [
+        p for p in worst_performers if p.get("short_score", 0) >= min_short_score
+    ]
+    
+    logger.info(f"Found {len(candidates)} candidates for short signals with score >= {min_short_score}.")
+    return candidates
+
+def logging_performance_summary(analysis_result: Dict[str, Any]) -> None:
+    """
+    Logs a formatted summary of the performance analysis results.
+
+    Args:
+        analysis_result: The result dictionary from the main analysis function.
     """
     if not analysis_result:
-        logger.warning("No analysis results to display")
+        logger.warning("Analysis result is empty, cannot generate summary.")
         return
+
+    logger.info("\n" + "="*80)
+    logger.info("           BEST PERFORMANCE SYMBOLS - ANALYSIS SUMMARY")
+    logger.info("="*80)
     
-    try:
-        summary = analysis_result.get('summary', {})
-        best_performers = analysis_result.get('best_performers', [])
-        worst_performers = analysis_result.get('worst_performers', [])
-        
-        logger.analysis("="*80)
-        logger.analysis("CRYPTO PERFORMANCE ANALYSIS SUMMARY (LONG & SHORT)")
-        logger.analysis("="*80)
-        
-        logger.analysis(f"Analysis Date: {summary.get('analysis_timestamp', 'Unknown')}")
-        logger.analysis(f"Total Symbols Analyzed: {summary.get('total_symbols_analyzed', 0)}")
-        logger.analysis(f"Timeframes: {', '.join(summary.get('timeframes_analyzed', []))}")
-        logger.analysis(f"Top Performers (LONG): {summary.get('top_performers_count', 0)}")
-        logger.analysis(f"Worst Performers (SHORT): {summary.get('worst_performers_count', 0)}")
-        
-        # Display LONG signal performers
-        if best_performers:
-            logger.analysis(f"\n🟢 TOP {len(best_performers)} PERFORMERS (LONG SIGNALS):")
-            logger.analysis("-"*60)
-            
-            display_limit = min(DEFAULT_TOP_SYMBOLS, len(best_performers))
-            for i, performer in enumerate(best_performers[:display_limit], 1):
-                symbol = performer['symbol']
-                score = performer['composite_score']
-                tf_scores = performer.get('timeframe_scores', {})
-                
-                logger.analysis(f"{i:2d}. {symbol:12s} | Score: {score:.4f}")
-                if tf_scores:
-                    tf_str = " | ".join([f"{tf}: {score:.3f}" for tf, score in tf_scores.items()])
-                    logger.analysis(f"     Timeframe Scores: {tf_str}")
-        
-        # Display SHORT signal performers
-        if worst_performers:
-            logger.analysis(f"\n🔴 BOTTOM {len(worst_performers)} PERFORMERS (SHORT SIGNALS):")
-            logger.analysis("-"*60)
-            
-            display_limit = min(DEFAULT_TOP_SYMBOLS, len(worst_performers))
-            for i, performer in enumerate(worst_performers[:display_limit], 1):
-                symbol = performer['symbol']
-                score = performer['composite_score']
-                tf_scores = performer.get('timeframe_scores', {})
-                
-                logger.analysis(f"{i:2d}. {symbol:12s} | Score: {score:.4f}")
-                if tf_scores:
-                    tf_str = " | ".join([f"{tf}: {score:.3f}" for tf, score in tf_scores.items()])
-                    logger.analysis(f"     Timeframe Scores: {tf_str}")
-        
-        logger.analysis("="*80)
+    metadata = analysis_result.get("metadata", {})
+    logger.info(
+        f"Analysis completed at: {metadata.get('timestamp')} | "
+        f"Symbols Analyzed: {metadata.get('symbols_analyzed_count')} | "
+        f"Timeframes: {metadata.get('timeframes_analyzed')}"
+    )
+
+    best_performers = analysis_result.get("best_performers_long", [])
+    if best_performers:
+        logger.info("\n--- Top Performers (LONG Candidates) ---")
+        df_best = pd.DataFrame(best_performers).set_index('symbol')
+        logger.info("\n" + df_best[['long_score', 'short_score']].to_string())
     
-    except Exception as e:
-        logger.error(f"Error printing performance summary: {e}")
+    worst_performers = analysis_result.get("worst_performers_short", [])
+    if worst_performers:
+        logger.info("\n--- Worst Performers (SHORT Candidates) ---")
+        df_worst = pd.DataFrame(worst_performers).set_index('symbol')
+        logger.info("\n" + df_worst[['short_score', 'long_score']].to_string())
+
+    timeframe_analysis = analysis_result.get("timeframe_analysis", {})
+    if timeframe_analysis:
+        logger.info("\n" + "-"*30 + " TIMEFRAME DETAILS " + "-"*30)
+        for tf, data in timeframe_analysis.items():
+            stats = data.get("statistics", {})
+            logger.info(
+                f"\nTimeframe: {tf} | Symbols Processed: {stats.get('symbols_processed')}"
+            )
+            logger.info(
+                f"  Avg Score: {stats.get('avg_score', 0):.2f} | "
+                f"Avg Return: {stats.get('avg_return', 0):.2%} | "
+                f"Avg Volatility: {stats.get('avg_volatility', 0):.4f}"
+            )
+            top_performer = stats.get('top_performer', {})
+            if top_performer:
+                logger.info(
+                    f"  Top Performer: {top_performer.get('symbol')} "
+                    f"(Score: {top_performer.get('composite_score', 0):.2f})"
+                )
+    logger.info("\n" + "="*80)
 

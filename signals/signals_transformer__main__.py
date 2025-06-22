@@ -7,7 +7,7 @@ import time
 import torch
 from torch.utils.data import DataLoader
 
-# Add parent directory to sys.path
+# Add the parent directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from components.tick_processor import tick_processor
@@ -33,6 +33,7 @@ from signals.signals_transformer import (
     TimeSeriesTransformer,
     evaluate_model,
     get_latest_transformer_signal,
+    preprocess_transformer_data,
     select_and_scale_features,
     train_transformer_model,
 )
@@ -62,9 +63,13 @@ def main():
     with gpu_manager.gpu_scope():
         # Log GPU memory info
         gpu_info = gpu_manager.get_memory_info()
-        logger.memory(f"GPU Memory Info - Total: {gpu_info['total'] / (1024**3):.2f}GB, "
-                     f"Allocated: {gpu_info['allocated'] / (1024**3):.2f}GB, "
-                     f"Cached: {gpu_info['cached'] / (1024**3):.2f}GB")
+        # Use safe memory division to handle different types
+        total_gb = float(gpu_info['total']) / (1024**3) if isinstance(gpu_info['total'], (int, float)) else 0
+        allocated_gb = float(gpu_info['allocated']) / (1024**3) if isinstance(gpu_info['allocated'], (int, float)) else 0
+        cached_gb = float(gpu_info['cached']) / (1024**3) if isinstance(gpu_info['cached'], (int, float)) else 0
+        logger.memory(f"GPU Memory Info - Total: {total_gb:.2f}GB, "
+                     f"Allocated: {allocated_gb:.2f}GB, "
+                     f"Cached: {cached_gb:.2f}GB")
         
         # Initialize tick processor and fetch historical data
         processor = tick_processor(trade_open_callback=None, trade_close_callback=None)
@@ -84,15 +89,18 @@ def main():
     
     logger.data(f"Loaded {len(df)} rows of data for {symbol} {timeframe}")
     
-    # Data preprocessing
-    df_ind = generate_indicator_features(df)
-    data_scaled, scaler, feature_cols = select_and_scale_features(df_ind)
+    # Data preprocessing using the new preprocess_transformer_data function
+    X, y, scaler, feature_cols = preprocess_transformer_data(df)
+    
+    if len(X) == 0:
+        logger.error("Data preprocessing failed - no valid sequences created")
+        raise ValueError("Data preprocessing failed")
+    
     target_idx = feature_cols.index(COL_CLOSE)
     logger.config(f"Target index (close price) at position {target_idx} in features")
     
-    # Create dataset with appropriate sequence length
-    seq_len, pred_len = GPU_MODEL_CONFIG['seq_length'], GPU_MODEL_CONFIG['prediction_length']
-    dataset = CryptoDataset(data_scaled, seq_len, pred_len, len(feature_cols), target_idx)
+    # Create dataset with preprocessed sequences
+    dataset = CryptoDataset(X, y)
     
     # Split dataset into training, validation, and test sets
     n_samples = len(dataset)
@@ -112,7 +120,7 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
     
-    # Initialize model with appropriate configuration - Fix feature size mismatch
+    # Initialize model with appropriate configuration
     model_config = GPU_MODEL_CONFIG.copy() if gpu_available else CPU_MODEL_CONFIG.copy()
     model_config['feature_size'] = len(feature_cols)
     model = TimeSeriesTransformer(**model_config)
@@ -129,7 +137,18 @@ def main():
     logger.config(f"Model feature size: {len(feature_cols)}")
     
     # Train and evaluate model
-    trained_model = train_transformer_model(model, train_loader, val_loader, device=device)
+    trained_model, training_history = train_transformer_model(model, train_loader, val_loader, device=device)
+    
+    # Log training summary
+    if training_history and 'train_loss' in training_history:
+        final_train_loss = training_history['train_loss'][-1] if training_history['train_loss'] else 0
+        logger.analysis(f"Training completed - Final training loss: {final_train_loss:.6f}")
+        
+        if 'val_loss' in training_history and training_history['val_loss']:
+            final_val_loss = training_history['val_loss'][-1]
+            best_val_loss = min(training_history['val_loss'])
+            logger.analysis(f"Validation - Final: {final_val_loss:.6f}, Best: {best_val_loss:.6f}")
+    
     mse, mae = evaluate_model(trained_model, test_loader, scaler, feature_cols, target_idx, device=device)
     
     # Log performance metrics

@@ -301,8 +301,8 @@ class GPUResourceManager:
             logger.info(f"CUDA available: {cuda_available}")
             
             if cuda_available:
-                if hasattr(torch.version, 'cuda') and torch.version.cuda:
-                    logger.info(f"CUDA version: {torch.version.cuda}")
+                if hasattr(torch, 'version') and hasattr(torch.version, 'cuda'):  # type: ignore
+                    logger.info(f"CUDA version: {torch.version.cuda}")  # type: ignore
                 if torch.backends.cudnn.is_available():
                     logger.info(f"cuDNN version: {torch.backends.cudnn.version()}")
                     

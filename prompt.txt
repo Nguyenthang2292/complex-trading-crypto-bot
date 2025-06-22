@@ -1,7 +1,11 @@
 *******PROMPT********
 
 - refactor lại, giữ nguyên logic, không thêm hàm mới hoặc tách nhỏ hàm đang có, tận dụng tối ưu các biến, loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết,
-bổ sung datatype cho input và return đầy đủ
+bổ sung datatype cho input và return đầy đủ theo chuẩn của Goolgle
+
+- Kiểm tra xem file có lỗi gì không (bao gồm cả lỗi logic)
+
+- Kiểm tra file xem có lỗi nào không (kể cả lỗi logic), sau đó loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết theo chuẩn Google
 
 - refactor lại các logger và print với method tương ứng từ _logger.py
 
@@ -12,4 +16,7 @@ bổ sung datatype cho input và return đầy đủ
 - signals_cnn_lstm_attention có chế độ early stopping chưa, nếu chưa có thì bổ sung cho tôi và tăng tối đa sử dụng gpu để training nhanh hơn, 
 sử dụng _gpu_resource_manager.py nếu có thể
 
-- Kiểm tra xem file có lỗi gì không (bao gồm cả lỗi logic)
+- kiểm tra, viết lại và bổ sung unittest cho tôi (cover toàn bộ các testcase), viết thành từng phần để tránh hạn chế token
+
+- refactor lại file, loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết theo chuẩn Google, sửa từng phần để tránh hạn chế token, sau đó chấm điểm theo Pylint
+

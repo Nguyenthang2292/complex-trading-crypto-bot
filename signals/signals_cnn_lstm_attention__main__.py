@@ -188,18 +188,42 @@ def cleanup_resources(processor=None, model=None):
 
 def get_model_configurations() -> List[ModelConfiguration]:
     """
-    Define all 4 model configurations
+    Define all model configurations with different output modes
+    
+    Creates 12 total configurations:
+    - 4 model types: LSTM, LSTM-Attention, CNN-LSTM, CNN-LSTM-Attention
+    - 3 output modes: classification, regression, classification_advanced
     
     Returns:
-        List of ModelConfiguration objects
+        List of ModelConfiguration objects for all combinations
     """
-    return [
+    base_configs = [
+        # Base configurations without output_mode (will be set dynamically)
         ModelConfiguration("LSTM", use_cnn=False, use_attention=False),
         ModelConfiguration("LSTM-Attention", use_cnn=False, use_attention=True, attention_heads=8),
         ModelConfiguration("CNN-LSTM", use_cnn=True, use_attention=False, look_back=50),
         ModelConfiguration("CNN-LSTM-Attention", use_cnn=True, use_attention=True, 
                          attention_heads=8, look_back=50)
     ]
+    
+    output_modes = ['classification', 'regression', 'classification_advanced']
+    
+    # Create all combinations
+    all_configs = []
+    for base_config in base_configs:
+        for output_mode in output_modes:
+            # Create a new config with the specific output mode
+            config = ModelConfiguration(
+                name=f"{base_config.name}-{output_mode.replace('_', '-')}",
+                use_cnn=base_config.use_cnn,
+                use_attention=base_config.use_attention,
+                attention_heads=base_config.attention_heads,
+                look_back=base_config.look_back,
+                output_mode=output_mode
+            )
+            all_configs.append(config)
+    
+    return all_configs
 
 def load_and_prepare_data(processor, symbols: List[str], timeframes: List[str]) -> Optional[pd.DataFrame]:
     """
@@ -472,8 +496,11 @@ def test_signal_generation(config: ModelConfiguration, model_path: str, test_sym
 
 def main():
     """
-    Main function that loads data, trains all model configurations,
+    Main function that loads data, trains all model configurations with all output modes,
     and tests signal generation on specified symbol and timeframe.
+    
+    Tests 12 total configurations:
+    - 4 model types × 3 output modes = 12 combinations
     
     Returns:
         Dict containing training results, signal results, and metrics,
@@ -484,11 +511,18 @@ def main():
     logger.info("="*80)
     logger.info("COMPREHENSIVE MODEL TRAINING AND TESTING")
     logger.info("="*80)
-    logger.info("Testing 4 model configurations:")
+    logger.info("Testing 12 model configurations (4 types × 3 output modes):")
+    logger.info("")
+    logger.info("MODEL TYPES:")
     logger.info("  1. LSTM")
     logger.info("  2. LSTM + Attention")
     logger.info("  3. CNN + LSTM")
     logger.info("  4. CNN + LSTM + Attention")
+    logger.info("")
+    logger.info("OUTPUT MODES:")
+    logger.info("  - classification: 3-class classification (UP/DOWN/NEUTRAL)")
+    logger.info("  - regression: Continuous return prediction")
+    logger.info("  - classification_advanced: Advanced classification with custom thresholds")
     logger.info("="*80)    
     
     gpu_manager = get_gpu_resource_manager()
@@ -526,9 +560,11 @@ def main():
         training_results = {}
         signal_results = {}
         
+        logger.info(f"Starting training for {len(model_configs)} model configurations...")
+        
         # Train and test each model configuration
         for i, config in enumerate(model_configs, 1):
-            logger.info(f"\n{'='*20} MODEL {i}/4: {config.name.upper()} {'='*20}")
+            logger.info(f"\n{'='*20} MODEL {i}/{len(model_configs)}: {config.name.upper()} {'='*20}")
             
             model, model_path = train_model_configuration(config, combined_df, gpu_manager)
             
@@ -559,51 +595,76 @@ def main():
         logger.info(f"Total execution time: {total_time:.2f} seconds")
         logger.info(f"Data processed: {len(combined_df)} rows from {len(symbols)} pairs")
         
-        # Training results summary
-        logger.info("\nTRAINING RESULTS:")
-        successful_models = 0
-        for config_name, result in training_results.items():
-            status = "✅ SUCCESS" if result['success'] else "❌ FAILED"
-            logger.info(f"  {config_name:20} : {status}")
-            if result['success']:
-                successful_models += 1
-                logger.debug(f"    Model saved: {result['model_path']}")
+        # Training results summary by model type and output mode
+        logger.info("\nTRAINING RESULTS BY MODEL TYPE:")
+        model_types = ['LSTM', 'LSTM-Attention', 'CNN-LSTM', 'CNN-LSTM-Attention']
+        output_modes = ['classification', 'regression', 'classification_advanced']
         
-        # Signal generation results
+        for model_type in model_types:
+            logger.info(f"\n{model_type}:")
+            for output_mode in output_modes:
+                config_name = f"{model_type}-{output_mode.replace('_', '-')}"
+                if config_name in training_results:
+                    status = "✅ SUCCESS" if training_results[config_name]['success'] else "❌ FAILED"
+                    logger.info(f"  {output_mode:20} : {status}")
+                else:
+                    logger.warning(f"  {output_mode:20} : ⚠️  NOT FOUND")
+        
+        # Signal generation results by model type
         logger.info(f"\nSIGNAL GENERATION RESULTS FOR {DEFAULT_TEST_SYMBOL} {DEFAULT_TEST_TIMEFRAME}:")
-        for config_name, signal in signal_results.items():
-            if signal == "FAILED":
-                logger.error(f"  {config_name:20} : ❌ FAILED")
-            elif signal == "ERROR":
-                logger.warning(f"  {config_name:20} : ⚠️  ERROR")
-            else:
-                logger.info(f"  {config_name:20} : 📊 {signal}")
+        for model_type in model_types:
+            logger.info(f"\n{model_type}:")
+            for output_mode in output_modes:
+                config_name = f"{model_type}-{output_mode.replace('_', '-')}"
+                if config_name in signal_results:
+                    signal = signal_results[config_name]
+                    if signal == "FAILED":
+                        logger.error(f"  {output_mode:20} : ❌ FAILED")
+                    elif signal.startswith("ERROR"):
+                        logger.warning(f"  {output_mode:20} : ⚠️  ERROR")
+                    else:
+                        logger.info(f"  {output_mode:20} : 📊 {signal}")
+                else:
+                    logger.warning(f"  {output_mode:20} : ⚠️  NOT FOUND")
         
         # Performance summary
-        logger.info("\nPERFORMANCE SUMMARY:")
-        logger.info(f"  Models trained successfully: {successful_models}/4")
-        logger.info(f"  Success rate: {successful_models/4*100:.1f}%")
-        logger.info(f"  Average time per model: {total_time/4:.2f}s")
+        successful_models = sum(1 for result in training_results.values() if result['success'])
+        total_models = len(model_configs)
         
-        # Detailed configuration comparison
-        logger.info("\nCONFIGURATION COMPARISON:")
-        for config in model_configs:
-            logger.debug(f"  {config.name}:")
-            logger.debug(f"    - CNN: {config.use_cnn}")
-            logger.debug(f"    - Attention: {config.use_attention}")
-            if config.use_attention:
-                logger.debug(f"    - Attention Heads: {config.attention_heads}")
-            if config.use_cnn:
-                logger.debug(f"    - Look Back: {config.look_back}")
-            logger.info(f"    - Training: {'✅' if training_results[config.name]['success'] else '❌'}")
-            logger.info(f"    - Signal: {signal_results[config.name]}")        
+        logger.info("\nPERFORMANCE SUMMARY:")
+        logger.info(f"  Models trained successfully: {successful_models}/{total_models}")
+        logger.info(f"  Success rate: {successful_models/total_models*100:.1f}%")
+        logger.info(f"  Average time per model: {total_time/total_models:.2f}s")
+        
+        # Success rate by output mode
+        logger.info("\nSUCCESS RATE BY OUTPUT MODE:")
+        for output_mode in output_modes:
+            mode_configs = [name for name in training_results.keys() if output_mode in name]
+            mode_success = sum(1 for name in mode_configs if training_results[name]['success'])
+            mode_total = len(mode_configs)
+            if mode_total > 0:
+                success_rate = mode_success / mode_total * 100
+                logger.info(f"  {output_mode:20} : {mode_success}/{mode_total} ({success_rate:.1f}%)")
+        
+        # Success rate by model type
+        logger.info("\nSUCCESS RATE BY MODEL TYPE:")
+        for model_type in model_types:
+            type_configs = [name for name in training_results.keys() if model_type in name]
+            type_success = sum(1 for name in type_configs if training_results[name]['success'])
+            type_total = len(type_configs)
+            if type_total > 0:
+                success_rate = type_success / type_total * 100
+                logger.info(f"  {model_type:20} : {type_success}/{type_total} ({success_rate:.1f}%)")
+        
         logger.info("Comprehensive model testing completed!")
         
         return {
             'training_results': training_results,
             'signal_results': signal_results,
             'total_time': total_time,
-            'success_rate': successful_models/4
+            'success_rate': successful_models/total_models,
+            'total_models': total_models,
+            'successful_models': successful_models
         }
         
     except Exception as e:
@@ -616,17 +677,25 @@ def main():
 
 if __name__ == "__main__":
     logger.info("Starting comprehensive model training and testing...")
-    logger.info("This will test all 4 model configurations:")
+    logger.info("This will test all 12 model configurations (4 types × 3 output modes):")
+    logger.info("")
+    logger.info("MODEL TYPES:")
     logger.info("  1. LSTM")
     logger.info("  2. LSTM + Attention") 
     logger.info("  3. CNN + LSTM")
     logger.info("  4. CNN + LSTM + Attention")
+    logger.info("")
+    logger.info("OUTPUT MODES:")
+    logger.info("  - classification: 3-class classification (UP/DOWN/NEUTRAL)")
+    logger.info("  - regression: Continuous return prediction")
+    logger.info("  - classification_advanced: Advanced classification with custom thresholds")
     logger.info("")
     
     result = main()
     
     if result:
         logger.info("All tests completed successfully!")
-        logger.info(f"Overall success rate: {result['success_rate']*100:.1f}%")
+        logger.info(f"Overall success rate: {result['success_rate']*100:.1f}% ({result['successful_models']}/{result['total_models']} models)")
+        logger.info(f"Total execution time: {result['total_time']:.2f} seconds")
     else:
         logger.error("Tests failed!")

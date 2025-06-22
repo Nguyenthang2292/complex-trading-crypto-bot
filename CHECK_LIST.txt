@@ -1,0 +1,7 @@
+- Refactor lại file, loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết theo chuẩn Google, 
+- Sửa từng phần để tránh hạn chế token
+
+- Update logger
+- Update GPU resources
+
+- Sau đó chấm điểm theo Pylint
