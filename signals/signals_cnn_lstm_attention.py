@@ -94,8 +94,8 @@ try:
                     cuda_version = torch.version.cuda                               # type: ignore
                 logger.gpu(
                     f"CUDA {cuda_version} available with "
-                    f"{torch.cuda.device_count()} device(s) - "
-                    f"Using device: {gpu_manager.current_device}"
+                        f"{torch.cuda.device_count()} device(s) - "
+                        f"Using device: {gpu_manager.current_device}"
                 )
                 
                 # Log GPU memory info

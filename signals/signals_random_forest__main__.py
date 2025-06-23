@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from components._combine_all_dataframes import combine_all_dataframes
 from components._load_all_symbols_data import load_all_symbols_data
-from components.tick_processor import tick_processor
+from components.tick_processor import TickProcessor
 from components.config import (
     DATA_PROCESSING_WAIT_TIME_IN_SECONDS,
     DEFAULT_CRYPTO_SYMBOLS,
@@ -56,7 +56,7 @@ def main():
     
     # Initialize Binance tick processor
     try:
-        processor = tick_processor(trade_open_callback=None, trade_close_callback=None)
+        processor = TickProcessor(trade_open_callback=None, trade_close_callback=None)
         logger.network(f"Successfully initialized Crypto TickProcessor with Binance API")
         if processor is None:
             logger.error("Failed to initialize tick processor instance")
@@ -76,7 +76,7 @@ def main():
     else:
         # Get all available USDT trading pairs from Binance
         try:
-            all_usdt_pairs = processor.get_symbols_list_by_quote_usdt()
+            all_usdt_pairs = processor.get_symbols_list_by_quote_asset('USDT')
             logger.network(f"Found {len(all_usdt_pairs)} USDT trading pairs on Binance")
             
             top_symbols_to_use = args.top_symbols if args.top_symbols > 0 else DEFAULT_TOP_SYMBOLS
@@ -102,7 +102,7 @@ def main():
 
     if not all_symbols_data:
         logger.warning("No data loaded for Random Forest signal analysis")
-        return pd.DataFrame([], columns=DATAFRAME_COLUMNS)
+        return pd.DataFrame(columns=pd.Index(DATAFRAME_COLUMNS))
     
     # Filter and combine valid data
     valid_symbols_data = {k: v for k, v in all_symbols_data.items() 
@@ -130,7 +130,13 @@ def main():
         logger.model(f"- Model type: {type(model).__name__}")
         logger.model(f"- Trees (n_estimators): {model_params['n_estimators']}")
         logger.model(f"- Max depth: {'unlimited' if model_params['max_depth'] is None else model_params['max_depth']}")
-        logger.model(f"- Number of features: {model.n_features_in_}")
+        
+        # Check if model has been fitted before accessing n_features_in_
+        if hasattr(model, 'n_features_in_'):
+            logger.model(f"- Number of features: {model.n_features_in_}")  # type: ignore
+        else:
+            logger.model(f"- Number of features: Not available (model not fitted)")
+            
         logger.model(f"- Random state: {model_params['random_state']}")
         
         # Feature importance analysis
@@ -145,6 +151,7 @@ def main():
                 logger.analysis(f"- {row['Feature']}: {row['Importance']:.4f}")
         
         # First tree analysis
+        if hasattr(model, 'estimators_') and model.estimators_:
         first_tree = model.estimators_[0]
         logger.model(f"\n🌲 FIRST TREE INFORMATION:")
         logger.model(f"- Nodes: {first_tree.tree_.node_count}")
@@ -153,7 +160,10 @@ def main():
         
         # Additional parameters
         logger.model(f"\n⚙️ OTHER PARAMETERS:")
+        if hasattr(model, 'classes_'):
         logger.model(f"- Classes: {model.classes_}")
+        else:
+            logger.model(f"- Classes: Not available (model not fitted)")
         logger.model(f"- OOB score enabled: {model_params.get('oob_score', False)}")
         
         logger.info("=" * 80)

@@ -1,9 +1,12 @@
 - Kiểm tra lại Pylint trước để xem file nào đã đạt chuẩn PEP8
+(chạy Pylint cho tôi để đánh giá theo chuẩn PEP8)
 
-- Refactor lại file, loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết theo chuẩn Google, 
+- Refactor lại file, loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết theo chuẩn PEP8, 
 - Sửa từng phần để tránh hạn chế token
 
 - Update logger
-- Update GPU resources
+- Update GPU resources (nếu có)
 
-- Sau đó chấm điểm theo Pylint
+- Sau đó chấm điểm lại theo Pylint
+
+- Kiểm tra, viết lại và bổ sung unittest cho tôi (cover toàn bộ các testcase), viết thành từng phần để tránh hạn chế token

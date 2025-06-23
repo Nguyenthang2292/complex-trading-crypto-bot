@@ -24,7 +24,6 @@ from components.config import (
     WINDOW_SIZE_LSTM,
 )
 from signals._components.LSTM__function__get_optimal_batch_size import get_optimal_batch_size
-from signals.signals_cnn_lstm_attention import safe_save_model
 from utilities._logger import setup_logging
 
 logger = setup_logging(
@@ -194,6 +193,8 @@ def _save_model_checkpoint(
     Returns:
         Path to saved model
     """
+    from signals.signals_cnn_lstm_attention import safe_save_model
+    
     model_path = Path(MODELS_DIR) / model_filename
     checkpoint = {
         'model_state_dict': model.state_dict(),

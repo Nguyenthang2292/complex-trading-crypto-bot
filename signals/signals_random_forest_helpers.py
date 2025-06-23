@@ -61,6 +61,10 @@ def _prepare_training_data(df: pd.DataFrame) -> Optional[Tuple[pd.DataFrame, pd.
         [1, -1],
         default=0
     )
+    
+    # Ensure target is numeric and convert to int
+    df_with_features['target'] = pd.to_numeric(df_with_features['target'], errors='coerce').astype(int)
+    
     df_with_features.dropna(subset=['target'] + MODEL_FEATURES, inplace=True)
     
     if len(df_with_features) < MIN_TRAINING_SAMPLES:
@@ -130,6 +134,9 @@ def _apply_smote(features: pd.DataFrame, target: pd.Series) -> Tuple[pd.DataFram
             )
         if not isinstance(target_resampled, pd.Series):
             target_resampled = pd.Series(target_resampled, name='target')
+        
+        # Ensure target remains numeric
+        target_resampled = pd.to_numeric(target_resampled, errors='coerce').astype(int)
         
         return features_resampled, target_resampled
     except (ValueError, RuntimeError, MemoryError) as e:

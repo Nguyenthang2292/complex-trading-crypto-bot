@@ -160,7 +160,8 @@ def apply_confidence_threshold(
     Returns:
         An array of predictions adjusted for the confidence threshold.
     """
-    y_pred_confident = np.full(y_proba.shape[0], SIGNAL_NEUTRAL)
+    # Use numeric 0 for neutral instead of string SIGNAL_NEUTRAL
+    y_pred_confident = np.full(y_proba.shape[0], 0, dtype=int)
     max_proba = y_proba.max(axis=1)
     high_confidence_mask = max_proba >= threshold
     if np.any(high_confidence_mask):
@@ -178,17 +179,21 @@ def calculate_and_display_metrics(
         y_pred: The predicted labels.
         threshold: The confidence threshold used for the predictions.
     """
-    labels = np.unique(np.concatenate((y_true.to_numpy(), y_pred)))
+    # Ensure both y_true and y_pred are numeric for consistent label types
+    y_true_numeric = pd.to_numeric(y_true, errors='coerce').astype(int) # type: ignore
+    y_pred_numeric = y_pred.astype(int)
+    
+    labels = np.unique(np.concatenate((y_true_numeric.to_numpy(), y_pred_numeric))) # type: ignore
     precision = precision_score(
-        y_true, y_pred, average='weighted', labels=labels, zero_division="warn"
+        y_true_numeric, y_pred_numeric, average='weighted', labels=labels, zero_division="warn"
     )
     recall = recall_score(
-        y_true, y_pred, average='weighted', labels=labels, zero_division="warn"
+        y_true_numeric, y_pred_numeric, average='weighted', labels=labels, zero_division="warn"
     )
     f1 = f1_score(
-        y_true, y_pred, average='weighted', labels=labels, zero_division="warn"
+        y_true_numeric, y_pred_numeric, average='weighted', labels=labels, zero_division="warn"
     )
-    accuracy = accuracy_score(y_true, y_pred)
+    accuracy = accuracy_score(y_true_numeric, y_pred_numeric)
     logger.info(
         f"Metrics @ {threshold:.2f} threshold | "
         f"Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, "

@@ -10,48 +10,69 @@ Usage:
 
 import logging
 import os
-import pandas as pd
 import shutil
 import sys
 from typing import Dict, List, Optional, Tuple, Any, Union
 
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+import pandas as pd
 
 from components._load_all_symbols_data import load_all_symbols_data
-from components.tick_processor import tick_processor
+from components.tick_processor import TickProcessor
 from components._combine_all_dataframes import combine_all_dataframes
 from components.config import (
-    DEFAULT_TIMEFRAMES, DEFAULT_CRYPTO_SYMBOLS, MODELS_DIR, 
-    SIGNAL_LONG, SIGNAL_SHORT, SIGNAL_NEUTRAL
+    DEFAULT_TIMEFRAMES, 
+    DEFAULT_CRYPTO_SYMBOLS, 
+    MODELS_DIR,
+    SIGNAL_LONG, 
+    SIGNAL_SHORT, 
+    SIGNAL_NEUTRAL
 )
-from signals.signals_best_performance_symbols import signal_best_performance_symbols, get_short_signal_candidates
-from signals.signals_random_forest import get_latest_random_forest_signal, load_random_forest_model, train_and_save_global_rf_model
+from signals.signals_best_performance_symbols import (
+    signal_best_performance_symbols, 
+    get_short_signal_candidates
+)
+from signals.signals_random_forest import (
+    get_latest_random_forest_signal, 
+    load_random_forest_model,
+    train_and_save_global_rf_model
+)
 from signals.signals_hmm import hmm_signals
-from signals.signals_transformer import get_latest_transformer_signal, load_transformer_model, train_and_save_transformer_model
+from signals.signals_transformer import (
+    get_latest_transformer_signal, 
+    load_transformer_model,
+    train_and_save_transformer_model
+)
 from signals.signals_cnn_lstm_attention import (
-    train_cnn_lstm_attention_model, 
-    load_cnn_lstm_attention_model, 
+    train_cnn_lstm_attention_model,
+    load_cnn_lstm_attention_model,
     get_latest_cnn_lstm_attention_signal
 )
-
 from utilities._logger import setup_logging
+
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 logger = setup_logging(module_name="trading_signal_analyzer", log_level=logging.INFO)
 
 class TradingSignalAnalyzer:
     """Analyzes trading signals from multiple ML models for a given symbol."""
-    
+
     def __init__(self) -> None:
         """Initializes the analyzer, fetching the list of valid symbols."""
         self.valid_timeframes: List[str] = DEFAULT_TIMEFRAMES
-        self.processor = tick_processor(trade_open_callback=None, trade_close_callback=None)
-        
+        self.processor = TickProcessor(trade_open_callback=None, trade_close_callback=None)
+
         try:
             self.valid_symbols: List[str] = self.processor.get_symbols_list_by_quote_usdt()
-            logger.config(f"Initialized with {len(self.valid_symbols)} USDT pair symbols from the exchange.")
-        except Exception as e:
-            logger.warning(f"Could not fetch symbols from exchange: {e}. Using default list.")
+            logger.config(
+                f"Initialized with {len(self.valid_symbols)} USDT "
+                "pair symbols from the exchange."
+            )
+        except (ConnectionError, ValueError, KeyError) as e:
+            logger.warning(
+                f"Could not fetch symbols from exchange: {e}. Using default list."
+            )
             self.valid_symbols = DEFAULT_CRYPTO_SYMBOLS
-        
+
     def validate_symbol(self, symbol: str) -> bool:
         """Checks if a symbol is valid according to the fetched list.
 
@@ -62,10 +83,14 @@ class TradingSignalAnalyzer:
             True if the symbol is valid, False otherwise.
         """
         if '-' in symbol:
-            base, quote = symbol.split('-')
+            parts = symbol.split('-')
+            if len(parts) != 2:
+                logger.warning(f"Invalid symbol format received: {symbol}")
+                return False
+            base, quote = parts
             symbol = f"{base}{quote}"
         return symbol.upper() in [s.upper() for s in self.valid_symbols]
-    
+
     def normalize_symbol(self, symbol: str) -> str:
         """Normalizes a symbol name to the 'BTCUSDT' format.
 
@@ -79,7 +104,7 @@ class TradingSignalAnalyzer:
             base, quote = symbol.split('-')
             return f"{base}{quote}".upper()
         return symbol.upper()
-    
+
     def clear_models_directory(self) -> None:
         """Removes and recreates the models directory."""
         try:
@@ -88,58 +113,65 @@ class TradingSignalAnalyzer:
                 shutil.rmtree(MODELS_DIR)
             MODELS_DIR.mkdir(parents=True, exist_ok=True)
             logger.success("Models directory has been cleared and recreated.")
-        except IOError as e:
+        except OSError as e:
             logger.error(f"Error clearing models directory: {e}")
             raise
-    
+
     def reload_all_models(self) -> None:
-        """Fetches all data and retrains all global models."""
+        """Fetches all data, retrains, and saves all global models."""
         try:
             logger.process("Starting to reload all models...")
             self.clear_models_directory()
-            
+
             logger.data(
                 f"Loading data for {len(self.valid_symbols)} symbols and "
-                f"{len(DEFAULT_TIMEFRAMES)} timeframes...")
-            
+                f"{len(DEFAULT_TIMEFRAMES)} timeframes..."
+            )
+            # Load data for all symbols and timeframes
             all_symbols_data = load_all_symbols_data(
                 processor=self.processor,
                 symbols=self.valid_symbols,
-                timeframes=DEFAULT_TIMEFRAMES
+                timeframes=DEFAULT_TIMEFRAMES,
             )
-            
             if not all_symbols_data:
                 raise RuntimeError("Failed to load any symbol data.")
-            
+
             logger.data("Combining all dataframes...")
-            # Filter out None values and ensure correct data structure before combining
-            filtered_data: Dict[str, Dict[str, pd.DataFrame]] = {}
-            for symbol, data in all_symbols_data.items():
-                if data is not None:
-                    if isinstance(data, dict):
-                        # Filter out None DataFrames within the inner dictionary
-                        filtered_data[symbol] = {
-                            tf: df for tf, df in data.items() if isinstance(df, pd.DataFrame)
-                        }
-                    elif isinstance(data, pd.DataFrame):
-                        # If data is a DataFrame, wrap it in a dict with a default timeframe key
-                        filtered_data[symbol] = {'default': data}
-
-            combined_df = combine_all_dataframes(filtered_data)
-
+            combined_df = self._prepare_combined_dataframe(all_symbols_data)
             if combined_df.empty:
-                raise RuntimeError("Combined dataframe is empty.")
-            
+                raise RuntimeError("Combined dataframe is empty, no data to train.")
+
             logger.success(
                 f"Successfully combined dataframe with {len(combined_df)} rows."
             )
             self._train_all_models_from_combined_data(combined_df)
             logger.success("Finished reloading all models.")
-            
-        except Exception as e:
+
+        except (RuntimeError, IOError, OSError) as e:
             logger.error(f"Error during model reload: {e}")
             raise
-    
+
+    def _prepare_combined_dataframe(self, all_symbols_data: Dict[str, Any]) -> pd.DataFrame:
+        """Prepare combined dataframe from symbol data.
+
+        Args:
+            all_symbols_data: Raw symbol data dictionary.
+
+        Returns:
+            Combined pandas DataFrame.
+        """
+        filtered_data: Dict[str, Dict[str, pd.DataFrame]] = {}
+        for symbol, data in all_symbols_data.items():
+            if data is not None:
+                if isinstance(data, dict):
+                    filtered_data[symbol] = {
+                        tf: df for tf, df in data.items() if isinstance(df, pd.DataFrame)
+                    }
+                elif isinstance(data, pd.DataFrame):
+                    filtered_data[symbol] = {'default': data}
+
+        return combine_all_dataframes(filtered_data)
+
     def _train_all_models_from_combined_data(self, combined_df: pd.DataFrame) -> None:
         """Trains all models using a single combined dataframe.
 
@@ -154,57 +186,105 @@ class TradingSignalAnalyzer:
 
         unique_symbols = combined_df['symbol'].nunique() if 'symbol' in combined_df.columns else 0
         unique_timeframes = combined_df['timeframe'].nunique() if 'timeframe' in combined_df.columns else 0
-        logger.data(f"Training data contains {unique_symbols} unique symbols and {unique_timeframes} unique timeframes")
+        logger.data(
+            f"Training data contains {unique_symbols} unique symbols and "
+            f"{unique_timeframes} unique timeframes"
+        )
 
-        # --- Train Non-LSTM based models ---
+        self._train_non_lstm_models(combined_df)
+        self._train_lstm_models(combined_df)
+
+        logger.success("Completed training all models from combined data.")
+
+    def _train_non_lstm_models(self, combined_df: pd.DataFrame) -> None:
+        """Train non-LSTM based models.
+
+        Args:
+            combined_df: Combined training data.
+        """
         non_lstm_configs = [
-            ("Random Forest", lambda: train_and_save_global_rf_model(combined_df, model_filename="rf_model_global.joblib")),
-            ("Transformer", lambda: train_and_save_transformer_model(combined_df, model_filename="transformer_model_global.pth"))
+            ("Random Forest", lambda: train_and_save_global_rf_model(
+                combined_df, model_filename="rf_model_global.joblib"
+            )),
+            ("Transformer", lambda: train_and_save_transformer_model(
+                combined_df, model_filename="transformer_model_global.pth"
+            )),
         ]
         for model_name, train_func in non_lstm_configs:
             logger.model(f"Training {model_name} model...")
             try:
                 model, model_path = train_func()
-                if model:
+                if model and model_path:
                     logger.success(f"{model_name} model saved: {model_path}")
                 else:
-                    logger.warning(f"{model_name} training failed.")
-            except Exception as e:
+                    logger.warning(f"{model_name} training failed or model not saved.")
+            except (ValueError, TypeError, IOError) as e:
                 logger.error(f"Error training {model_name} model: {e}")
 
-        # --- Train all 12 LSTM model variants ---
+    def _train_lstm_models(self, combined_df: pd.DataFrame) -> None:
+        """Train all 12 LSTM model variants based on the combined data.
+
+        Args:
+            combined_df: Combined training data.
+        """
         lstm_base_configs = [
             ("LSTM", False, False),
             ("LSTM-Attention", False, True),
             ("CNN-LSTM", True, False),
-            ("CNN-LSTM-Attention", True, True)
+            ("CNN-LSTM-Attention", True, True),
         ]
         output_modes = ['classification', 'regression', 'classification_advanced']
 
-        logger.model("Starting training for 12 LSTM configurations (4 types × 3 output modes)...")
+        logger.model(
+            "Starting training for 12 LSTM configurations "
+            "(4 types × 3 output modes)..."
+        )
         for base_name, use_cnn, use_attention in lstm_base_configs:
             for output_mode in output_modes:
-                model_name = f"{base_name}-{output_mode.replace('_', '-')}"
-                filename = f"{base_name.lower().replace('-', '_')}_{output_mode.replace('_', '-')}_model_global.pth"
-                logger.model(f"Training {model_name} model...")
-                try:
-                    model, model_path = train_cnn_lstm_attention_model(
-                        combined_df,
-                        model_filename=filename,
-                        use_cnn=use_cnn,
-                        use_attention=use_attention,
-                        output_mode=output_mode
-                    )
-                    if model:
-                        logger.success(f"{model_name} model saved: {model_path}")
-                    else:
-                        logger.warning(f"{model_name} training failed.")
-                except Exception as e:
-                    logger.error(f"Error training {model_name} model: {e}")
-        
-        logger.success("Completed training all models from combined data.")
-    
-    def analyze_best_performance_signals(self) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+                self._train_single_lstm_model(
+                    combined_df, base_name, use_cnn, use_attention, output_mode
+                )
+
+    def _train_single_lstm_model(
+        self,
+        combined_df: pd.DataFrame,
+        base_name: str,
+        use_cnn: bool,
+        use_attention: bool,
+        output_mode: str,
+    ) -> None:
+        """Train a single LSTM model variant.
+
+        Args:
+            combined_df: Combined training data.
+            base_name: Base model name.
+            use_cnn: Whether to use CNN.
+            use_attention: Whether to use attention.
+            output_mode: Output mode for the model.
+        """
+        model_name = f"{base_name}-{output_mode.replace('_', '-')}"
+        filename = (
+            f"{base_name.lower().replace('-', '_')}_{output_mode}_model_global.pth"
+        )
+        logger.model(f"Training {model_name} model...")
+        try:
+            model, model_path = train_cnn_lstm_attention_model(
+                combined_df,
+                model_filename=filename,
+                use_cnn=use_cnn,
+                use_attention=use_attention,
+                output_mode=output_mode,
+            )
+            if model:
+                logger.success(f"{model_name} model saved: {model_path}")
+            else:
+                logger.warning(f"{model_name} training failed.")
+        except (ValueError, TypeError, IOError) as e:
+            logger.error(f"Error training {model_name} model: {e}")
+
+    def analyze_best_performance_signals(
+        self,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """Runs the best/worst performance analysis to get candidate symbols.
 
         Returns:
@@ -220,13 +300,7 @@ class TradingSignalAnalyzer:
             logger.error("No data available to analyze performance.")
             return [], []
 
-        # Filter symbol_data to match expected type structure for preloaded_data
-        filtered_symbol_data_perf: Dict[str, Dict[str, pd.DataFrame]] = {}
-        for symbol, data in symbol_data.items():
-            if isinstance(data, dict):
-                filtered_symbol_data_perf[symbol] = {
-                    tf: df for tf, df in data.items() if isinstance(df, pd.DataFrame)
-                }
+        filtered_symbol_data_perf = self._filter_symbol_data(symbol_data)
 
         analysis_result = signal_best_performance_symbols(
             processor=self.processor,
@@ -246,59 +320,65 @@ class TradingSignalAnalyzer:
 
         long_candidates = analysis_result.get('best_performers', [])
         short_candidates = get_short_signal_candidates(analysis_result, min_short_score=0.6)
-        logger.analysis(f"Found {len(long_candidates)} LONG candidates and {len(short_candidates)} SHORT candidates.")
+        logger.analysis(
+            f"Found {len(long_candidates)} LONG candidates and "
+            f"{len(short_candidates)} SHORT candidates."
+        )
         return long_candidates, short_candidates
-    
+
+    def _filter_symbol_data(self, symbol_data: Dict[str, Any]) -> Dict[str, Dict[str, pd.DataFrame]]:
+        """Filter symbol data to match expected type structure.
+
+        Args:
+            symbol_data: Raw symbol data.
+
+        Returns:
+            Filtered symbol data.
+        """
+        filtered_data: Dict[str, Dict[str, pd.DataFrame]] = {}
+        for symbol, data in symbol_data.items():
+            if isinstance(data, dict):
+                filtered_data[symbol] = {
+                    tf: df for tf, df in data.items() if isinstance(df, pd.DataFrame)
+                }
+        return filtered_data
+
     def check_symbol_in_performance_list(
-        self,
-        symbol: str,
-        timeframe: str,
-        signal: str,
-        long_candidates: List[Dict[str, Any]],
-        short_candidates: List[Dict[str, Any]]
+        self, symbol: str, timeframe: str, signal: str,
+        performance_candidates: Dict[str, List[Dict[str, Any]]]
     ) -> int:
-        """Checks if a symbol is in the top/worst performers list.
+        """Checks if a symbol/timeframe is in the top/bottom performers.
 
         Args:
             symbol: The symbol to check.
             timeframe: The timeframe to check.
-            signal: The target signal ('LONG' or 'SHORT').
-            long_candidates: List of best-performing symbols.
-            short_candidates: List of worst-performing symbols.
+            signal: The signal to check ('LONG' or 'SHORT').
+            performance_candidates: Dict containing 'long' and 'short' lists.
 
         Returns:
-            1: If the symbol matches the signal type's performance list.
-           -1: If the signal is LONG but the symbol is in the SHORT list (conflict).
-            0: If there is no match or conflict.
+            1 if it's a match, -1 if it's a conflict, 0 otherwise.
         """
         try:
-            normalized_symbol = self.normalize_symbol(symbol)
-            
-            if signal.upper() == SIGNAL_LONG:
-                for candidate in long_candidates:
-                    if (candidate.get('symbol', '').upper() == normalized_symbol and
-                        timeframe in candidate.get('timeframe_scores', {})):
-                        logger.analysis(f"{symbol} {timeframe} is a top performer for LONG: +1")
-                        return 1
-                for candidate in short_candidates:
-                    if (candidate.get('symbol', '').upper() == normalized_symbol and
-                        timeframe in candidate.get('timeframe_scores', {})):
-                        logger.analysis(f"{symbol} {timeframe} is a worst performer (conflict for LONG): -1")
-                        return -1
+            norm_symbol = self.normalize_symbol(symbol)
+            long_candidates = performance_candidates.get('long', [])
+            short_candidates = performance_candidates.get('short', [])
 
-            elif signal.upper() == SIGNAL_SHORT:
-                for candidate in short_candidates:
-                    if (candidate.get('symbol', '').upper() == normalized_symbol and
-                        timeframe in candidate.get('timeframe_scores', {})):
-                        logger.analysis(f"{symbol} {timeframe} is a worst performer for SHORT: +1")
-                        return 1
-            
-            return 0
-            
-        except Exception as e:
-            logger.error(f"Error checking performance list for {symbol}: {e}")
-            return 0
-    
+            if signal == SIGNAL_LONG:
+                if any(c['symbol'] == norm_symbol and timeframe in c.get('timeframe_scores', {}) for c in long_candidates):
+                    return 1
+                if any(c['symbol'] == norm_symbol and timeframe in c.get('timeframe_scores', {}) for c in short_candidates):
+                    return -1
+            elif signal == SIGNAL_SHORT:
+                if any(c['symbol'] == norm_symbol and timeframe in c.get('timeframe_scores', {}) for c in short_candidates):
+                    return 1
+                if any(c['symbol'] == norm_symbol and timeframe in c.get('timeframe_scores', {}) for c in long_candidates):
+                    return -1
+        except (KeyError, TypeError) as e:
+            logger.error(
+                f"Error processing performance candidates for {symbol}/{timeframe}: {e}"
+            )
+        return 0
+
     def _get_market_data_for_symbol(self, symbol: str, timeframe: str) -> Optional[pd.DataFrame]:
         """Fetches market data for a specific symbol and timeframe.
 
@@ -315,11 +395,11 @@ class TradingSignalAnalyzer:
                 symbols=[symbol],
                 timeframes=[timeframe]
             )
-            
+
             if not symbol_data or symbol not in symbol_data:
                 logger.warning(f"No market data found for {symbol} on {timeframe}.")
                 return None
-            
+
             symbol_data_item = symbol_data.get(symbol)
             if symbol_data_item is None:
                 return None
@@ -331,13 +411,13 @@ class TradingSignalAnalyzer:
                 timeframe_data = symbol_data_item.get(timeframe)
                 if isinstance(timeframe_data, pd.DataFrame):
                     return timeframe_data
-            
-            return None # Return None if data is not in the expected format
-            
+
+            return None
+
         except Exception as e:
             logger.error(f"Error fetching market data for {symbol} {timeframe}: {e}")
             return None
-    
+
     def get_random_forest_signal_score(self, market_data: pd.DataFrame, signal: str) -> int:
         """Gets the signal score from the global Random Forest model."""
         try:
@@ -347,104 +427,117 @@ class TradingSignalAnalyzer:
             model = load_random_forest_model(model_path)
             if not model:
                 return 0
-            predicted_signal = get_latest_random_forest_signal(market_data, model)
-            return self._calculate_signal_match_score(predicted_signal, signal, "Random Forest")
+            predicted_signal, _ = get_latest_random_forest_signal(market_data, model)
+            return self._calculate_signal_match_score(predicted_signal, signal)
         except Exception as e:
             logger.error(f"Error getting Random Forest signal: {e}")
             return 0
-    
+
     def get_hmm_signal_score(self, market_data: pd.DataFrame, signal: str) -> int:
         """Gets the signal score from the HMM model (strict and non-strict)."""
         try:
-            hmm_signals_result = hmm_signals(market_data)
-            if len(hmm_signals_result) < 2:
+            hmm_results = hmm_signals(market_data)
+            if not isinstance(hmm_results, (list, tuple)) or len(hmm_results) < 2:
+                logger.warning("HMM signals returned an unexpected format or insufficient values.")
                 return 0
-            strict_sig, non_strict_sig = hmm_signals_result[:2]
+
+            strict_signal, non_strict_signal = hmm_results[:2]
             signal_map = {1: SIGNAL_LONG, -1: SIGNAL_SHORT, 0: SIGNAL_NEUTRAL}
-            strict_str = signal_map.get(strict_sig, SIGNAL_NEUTRAL)
-            non_strict_str = signal_map.get(non_strict_sig, SIGNAL_NEUTRAL)
-            return (self._calculate_signal_match_score(strict_str, signal, "HMM Strict") +
-                    self._calculate_signal_match_score(non_strict_str, signal, "HMM Non-strict"))
+            strict_signal_str = signal_map.get(strict_signal, SIGNAL_NEUTRAL)
+            non_strict_signal_str = signal_map.get(non_strict_signal, SIGNAL_NEUTRAL)
+
+            strict_score = self._calculate_signal_match_score(signal, strict_signal_str)
+            non_strict_score = self._calculate_signal_match_score(signal, non_strict_signal_str)
+
+            return strict_score + non_strict_score
         except Exception as e:
-            logger.error(f"Error getting HMM signal: {e}")
+            symbol_info = market_data.iloc[0]['symbol'] if not market_data.empty and 'symbol' in market_data.columns else 'unknown symbol'
+            logger.error(f"Error calculating HMM signal for {symbol_info}: {e}")
             return 0
-    
+
     def get_transformer_signal_score(self, market_data: pd.DataFrame, signal: str) -> int:
         """Gets the signal score from the global Transformer model."""
         try:
             model_path = MODELS_DIR / "transformer_model_global.pth"
             if not model_path.exists():
                 return 0
+
             model_data = load_transformer_model(str(model_path))
-            if not model_data or not model_data[0]:
+            if not model_data:
                 return 0
-            
+
             model, scaler, feature_cols, target_idx = model_data
             if model is None or scaler is None or feature_cols is None or target_idx is None:
+                logger.warning("Transformer model data is incomplete. Skipping prediction.")
                 return 0
-            
-            predicted_signal = get_latest_transformer_signal(market_data, model, scaler, feature_cols, target_idx)
-            return self._calculate_signal_match_score(predicted_signal, signal, "Transformer")
-        except Exception as e:
+
+            predicted_signal = get_latest_transformer_signal(
+                market_data, model, scaler, feature_cols, target_idx
+            )
+            return self._calculate_signal_match_score(predicted_signal, signal)
+        except (IOError, ValueError, TypeError) as e:
             logger.error(f"Error getting Transformer signal: {e}")
             return 0
-    
+
     def get_lstm_signal_score(self, market_data: pd.DataFrame, signal: str) -> int:
         """Gets the combined signal score from all 12 LSTM model variants."""
         total_score = 0
-        successful_predictions = 0
-        base_configs = [
-            ("LSTM", False, False), ("LSTM-Attention", False, True),
-            ("CNN-LSTM", True, False), ("CNN-LSTM-Attention", True, True)
-        ]
-        output_modes = ['classification', 'regression', 'classification_advanced']
-        
-        for base_name, use_cnn, use_attention in base_configs:
-            for output_mode in output_modes:
-                variant_name = f"{base_name}-{output_mode.replace('_', '-')}"
-                filename = f"{base_name.lower().replace('-', '_')}_{output_mode.replace('_', '-')}_model_global.pth"
-                model_path = MODELS_DIR / filename
-                
-                try:
-                    if not model_path.exists():
-                        continue
-                    loaded_data = load_cnn_lstm_attention_model(model_path)
-                    if not loaded_data:
-                        continue
-                    
-                    model, config, info, opt_res = loaded_data
-                    predicted = get_latest_cnn_lstm_attention_signal(
-                        df_input=market_data, model=model, model_config=config,
-                        data_info=info, optimization_results=opt_res
-                    )
-                    total_score += self._calculate_signal_match_score(predicted, signal, variant_name)
-                    successful_predictions += 1
-                except Exception as e:
-                    logger.debug(f"Error with LSTM variant {variant_name}: {e}")
+        model_files = list(MODELS_DIR.glob('*_model_global.pth'))
+        lstm_model_files = [f for f in model_files if any(n in str(f) for n in ['lstm', 'cnn'])]
+
+        if not lstm_model_files:
+            return 0
+
+        for model_path in lstm_model_files:
+            try:
+                model_data = load_cnn_lstm_attention_model(str(model_path))
+                if not model_data:
+                    logger.warning(f"Failed to load LSTM model from {model_path}")
                     continue
-        
-        if successful_predictions > 0:
-            logger.signal(f"LSTM Combined ({successful_predictions}/12 variants) total score: {total_score}")
-        
+
+                model, config, data_info, opt_res = model_data
+                if not model or not config:
+                    logger.warning(f"Invalid model or config in {model_path}")
+                    continue
+
+                predicted_signal = get_latest_cnn_lstm_attention_signal(
+                    market_data, model, config, data_info, opt_res
+                )
+                score = self._calculate_signal_match_score(signal, predicted_signal)
+                total_score += score
+                logger.signal(
+                    f"LSTM model {model_path.name}: "
+                    f"Predicted={predicted_signal}, Target={signal}, Score={score}"
+                )
+            except (IOError, ValueError, TypeError) as e:
+                logger.error(f"Error getting LSTM signal from {model_path.name}: {e}")
+
         return total_score
-    
-    def _calculate_signal_match_score(self, predicted_signal: str, target_signal: str, model_name: str) -> int:
-        """Calculates a score based on a signal match.
+
+    def _calculate_signal_match_score(self, main_signal: str, model_signal: str) -> int:
+        """Calculates a score based on how well the model signal matches the main signal.
 
         Args:
-            predicted_signal: The signal predicted by the model.
-            target_signal: The signal we are analyzing for ('LONG' or 'SHORT').
-            model_name: The name of the model for logging.
+            main_signal: The primary signal ('LONG', 'SHORT').
+            model_signal: The signal from a model.
 
         Returns:
-            1 if signals match, -1 if they conflict, 0 if neutral or no signal.
+            1 for a match, -1 for a conflict, 0 for neutral/no signal.
         """
-        if not predicted_signal or predicted_signal == SIGNAL_NEUTRAL:
+        main_signal = main_signal.upper()
+        model_signal = str(model_signal).upper()
+
+        if (not main_signal or main_signal == SIGNAL_NEUTRAL or
+                not model_signal or model_signal == SIGNAL_NEUTRAL):
             return 0
-        if predicted_signal.upper() == target_signal.upper():
+
+        if main_signal == model_signal:
             return 1
-        return -1
-    
+        # This condition means main_signal is 'LONG' and model_signal is 'SHORT' or vice-versa
+        if main_signal != model_signal:
+            return -1
+        return 0 # Should not be reached
+
     def calculate_final_threshold(self, total_score: int, max_possible_score: int) -> float:
         """Calculates the final confidence threshold from the total score.
 
@@ -461,11 +554,11 @@ class TradingSignalAnalyzer:
         """
         if max_possible_score == 0:
             return 0.0
-        
+
         # Normalize score from [-max, +max] to [0, 1]
         normalized_score = (total_score + max_possible_score) / (2 * max_possible_score)
         return max(0.0, min(1.0, normalized_score))
-    
+
     def _calculate_max_possible_score(self) -> int:
         """Calculates the maximum possible positive score across all models.
 
@@ -481,54 +574,52 @@ class TradingSignalAnalyzer:
             'lstm': 12             # LSTM: +12 (12 variants × +1 each)
         }
         return sum(model_max_scores.values())
-    
+
     def analyze_symbol_signal(
         self,
-        symbol: str,
-        timeframe: str,
-        signal: str,
-        long_candidates: List[Dict[str, Any]],
-        short_candidates: List[Dict[str, Any]]
+        analysis_params: Dict[str, str],
+        performance_candidates: Dict[str, List[Dict[str, Any]]]
     ) -> Dict[str, Union[str, int, float, Dict[str, int]]]:
         """Performs a comprehensive signal analysis for a single symbol.
 
-        This method aggregates scores from all available models to generate a
-        final score and a trading recommendation.
-
         Args:
-            symbol: The trading symbol.
-            timeframe: The data timeframe.
-            signal: The target signal ('LONG' or 'SHORT').
-            long_candidates: List of best-performing symbols.
-            short_candidates: List of worst-performing symbols.
+            analysis_params: Dict with 'symbol', 'timeframe', and 'signal'.
+            performance_candidates: Dict containing 'long' and 'short' lists.
 
         Returns:
             A dictionary containing the detailed analysis results.
         """
-        logger.analysis(f"Starting comprehensive analysis for {symbol} {timeframe} {signal}...")
-        
+        symbol = analysis_params['symbol']
+        timeframe = analysis_params['timeframe']
+        signal = analysis_params['signal']
+        logger.analysis(f"Starting analysis: {symbol}/{timeframe}/{signal}...")
+
         scores: Dict[str, int] = {}
-        
-        # 1. Performance list check
-        scores['performance'] = self.check_symbol_in_performance_list(
-            symbol, timeframe, signal, long_candidates, short_candidates
+        performance_score = self.check_symbol_in_performance_list(
+            symbol, timeframe, signal, performance_candidates
         )
-        
-        # 2. Model-based checks
+        scores['performance'] = performance_score
+
         market_data = self._get_market_data_for_symbol(symbol, timeframe)
         if market_data is None or market_data.empty:
-            logger.warning(f"No market data for {symbol} {timeframe}, skipping model checks.")
+            logger.warning(
+                f"No market data for {symbol}/{timeframe}, skipping model checks."
+            )
             scores.update({'random_forest': 0, 'hmm': 0, 'transformer': 0, 'lstm': 0})
         else:
-            scores['random_forest'] = self.get_random_forest_signal_score(market_data, signal)
+            scores['random_forest'] = self.get_random_forest_signal_score(
+                market_data, signal
+            )
             scores['hmm'] = self.get_hmm_signal_score(market_data, signal)
-            scores['transformer'] = self.get_transformer_signal_score(market_data, signal)
+            scores['transformer'] = self.get_transformer_signal_score(
+                market_data, signal
+            )
             scores['lstm'] = self.get_lstm_signal_score(market_data, signal)
 
         total_score = sum(scores.values())
         max_possible_score = self._calculate_max_possible_score()
         threshold = self.calculate_final_threshold(total_score, max_possible_score)
-        
+
         return {
             'symbol': symbol,
             'timeframe': timeframe,
@@ -539,26 +630,24 @@ class TradingSignalAnalyzer:
             'threshold': threshold,
             'recommendation': 'ENTER' if threshold >= 0.7 else 'WAIT'
         }
-    
+
     def run_analysis(
-        self,
-        reload_model: bool,
-        symbol: str,
-        timeframe: str,
-        signal: str
+        self, reload_model: bool, analysis_params: Dict[str, str]
     ) -> Dict[str, Any]:
         """Main entry point to run a full analysis for a given request.
 
         Args:
             reload_model: If True, retrains all models before analysis.
-            symbol: The trading symbol to analyze.
-            timeframe: The timeframe to analyze.
-            signal: The target signal to check for ('LONG' or 'SHORT').
+            analysis_params: Dict with 'symbol', 'timeframe', and 'signal'.
 
         Returns:
             A dictionary containing the analysis results or an error message.
         """
         try:
+            symbol = analysis_params['symbol']
+            timeframe = analysis_params['timeframe']
+            signal = analysis_params['signal']
+
             if not self.validate_symbol(symbol):
                 return {'error': f"Invalid symbol: '{symbol}'"}
             if timeframe not in self.valid_timeframes:
@@ -569,106 +658,138 @@ class TradingSignalAnalyzer:
             if reload_model:
                 logger.process("Model reload requested, starting the process...")
                 self.reload_all_models()
-            
+
             long_candidates, short_candidates = self.analyze_best_performance_signals()
-            
+            performance_candidates = {
+                'long': long_candidates, 'short': short_candidates
+            }
+
             result = self.analyze_symbol_signal(
-                symbol, timeframe, signal, long_candidates, short_candidates
+                analysis_params, performance_candidates
             )
-            
+
             return result
-            
-        except Exception as e:
+
+        except (KeyError, TypeError) as e:
+            logger.error(f"Invalid analysis parameters provided: {e}")
+            return {'error': 'Invalid analysis parameters.'}
+        except RuntimeError as e:
             logger.error(f"A critical error occurred during analysis: {e}")
             return {'error': str(e)}
 
-
 def print_analysis_result(result: Dict[str, Any]) -> None:
-    """Prints the analysis result in a formatted, user-friendly way.
+    """Logs the analysis result in a formatted, user-friendly way.
 
     Args:
         result: The result dictionary from the `run_analysis` method.
     """
     if 'error' in result:
-        print(f"❌ Error: {result['error']}")
+        logger.error(f"Analysis failed: {result['error']}")
         return
 
-    print("\n" + "="*60)
-    print("🔍 TRADING SIGNAL ANALYSIS RESULT")
-    print("="*60)
-    
-    print(f"📊 Symbol:    {result['symbol']}")
-    print(f"⏰ Timeframe: {result['timeframe']}")
-    print(f"📈 Signal:    {result['signal']}")
-    
-    print("\n📋 SCORE DETAILS:")
-    scores = result['scores']
-    print(f"  • Performance List:  {scores['performance']:+3d}")
-    print(f"  • Random Forest:     {scores['random_forest']:+3d}")
-    print(f"  • HMM (Combined):    {scores['hmm']:+3d}")
-    print(f"  • Transformer:       {scores['transformer']:+3d}")
-    print(f"  • LSTM (12 models):  {scores['lstm']:+3d}")
-    
-    print("\n🎯 FINAL ASSESSMENT:")
-    print(
-        f"  • Total Score:         {result['total_score']:+3d} / {result['max_possible_score']}"
-    )
-    print(f"  • Confidence Score:    {result['threshold']:.3f}")
-    
-    recommendation = result['recommendation']
-    if recommendation == 'ENTER':
-        print(f"  • Recommendation:      ✅ {recommendation} (Confidence ≥ 0.7)")
-    else:
-        print(f"  • Recommendation:      ⏳ {recommendation} (Confidence < 0.7)")
-    
-    print("="*60)
+    symbol = result.get('symbol', 'N/A')
+    timeframe = result.get('timeframe', 'N/A')
+    signal = result.get('signal', 'N/A')
+    scores = result.get('scores', {})
+    total_score = result.get('total_score', 0)
+    max_possible_score = result.get('max_possible_score', 1)
+    threshold = result.get('threshold', 0.0)
+    recommendation = result.get('recommendation', 'WAIT')
 
+    logger.analysis("\n" + "="*60)
+    logger.analysis("🔍 TRADING SIGNAL ANALYSIS RESULT")
+    logger.analysis("="*60)
+
+    logger.data(f"📊 Symbol:    {symbol}")
+    logger.data(f"⏰ Timeframe: {timeframe}")
+    logger.signal(f"📈 Signal:    {signal}")
+
+    logger.info("\n📋 SCORE DETAILS:")
+    if scores:
+        logger.performance(f"  • Performance List:  {scores.get('performance', 0):+3d}")
+        logger.model(f"  • Random Forest:     {scores.get('random_forest', 0):+3d}")
+        logger.model(f"  • HMM (Combined):    {scores.get('hmm', 0):+3d}")
+        logger.model(f"  • Transformer:       {scores.get('transformer', 0):+3d}")
+        logger.model(f"  • LSTM (12 models):  {scores.get('lstm', 0):+3d}")
+
+    logger.info("\n🎯 FINAL ASSESSMENT:")
+    logger.analysis(
+        f"  • Total Score:         {total_score:+3d} / {max_possible_score}"
+    )
+    logger.analysis(f"  • Confidence Score:    {threshold:.3f}")
+
+    if recommendation == 'ENTER':
+        logger.success(f"  • Recommendation:      ✅ {recommendation} (Confidence ≥ 0.7)")
+    else:
+        logger.warning(f"  • Recommendation:      ⏳ {recommendation} (Confidence < 0.7)")
+
+    logger.analysis("="*60)
 
 def main() -> None:
     """Main function to run the interactive command-line interface."""
     analyzer = TradingSignalAnalyzer()
 
-    print("="*60)
-    print("Trading Signal Analyzer (Global Models)")
-    print("="*60)
+    logger.info("\n" + "="*60)
+    logger.info("Trading Signal Analyzer (Global Models)")
+    logger.info("="*60)
 
     while True:
-        reload_input = input("❓ Do you want to reload all models? (yes/no): ").lower()
-        if reload_input in ['yes', 'y', 'no', 'n']:
-            reload_model = reload_input in ['yes', 'y']
-            break
-        print("   ❌ Invalid input. Please enter 'yes' or 'no'.")
+        try:
+            reload_input = input("❓ Do you want to reload all models? (yes/no): ").lower()
+            if reload_input in ['yes', 'y', 'no', 'n']:
+                reload_model = reload_input in ['yes', 'y']
+                break
+            logger.warning("   ❌ Invalid input. Please enter 'yes' or 'no'.")
+        except (KeyboardInterrupt, EOFError):
+            logger.info("\nExiting.")
+            return
 
     while True:
-        symbol_input = input("❓ Enter symbol to check (e.g., BTC-USDT): ").upper()
-        if analyzer.validate_symbol(symbol_input):
-            break
-        print(f"   ❌ Invalid symbol '{symbol_input}'. Please try again.")
+        try:
+            symbol_input = input("❓ Enter symbol to check (e.g., BTC-USDT): ").upper()
+            if analyzer.validate_symbol(symbol_input):
+                break
+            logger.warning(f"   ❌ Invalid symbol '{symbol_input}'. Please try again.")
+        except (KeyboardInterrupt, EOFError):
+            logger.info("\nExiting.")
+            return
 
     while True:
-        timeframe_input = input(f"❓ Enter timeframe ({', '.join(analyzer.valid_timeframes)}): ").lower()
-        if timeframe_input in analyzer.valid_timeframes:
-            break
-        print("   ❌ Invalid timeframe. Please choose from the list.")
+        try:
+            timeframe_input = input(f"❓ Enter timeframe ({', '.join(analyzer.valid_timeframes)}): ").lower()
+            if timeframe_input in analyzer.valid_timeframes:
+                break
+            logger.warning("   ❌ Invalid timeframe. Please choose from the list.")
+        except (KeyboardInterrupt, EOFError):
+            logger.info("\nExiting.")
+            return
 
     while True:
-        signal_input = input("❓ Enter signal to check (LONG/SHORT): ").upper()
-        if signal_input in [SIGNAL_LONG, SIGNAL_SHORT]:
-            break
-        print("   ❌ Invalid input. Please enter 'LONG' or 'SHORT'.")
+        try:
+            signal_input = input("❓ Enter signal to check (LONG/SHORT): ").upper()
+            if signal_input in [SIGNAL_LONG, SIGNAL_SHORT]:
+                break
+            logger.warning("   ❌ Invalid input. Please enter 'LONG' or 'SHORT'.")
+        except (KeyboardInterrupt, EOFError):
+            logger.info("\nExiting.")
+            return
 
-    print("="*60)
+    logger.config("\n" + "="*60)
     logger.config("Starting analysis with parameters:")
     logger.config(f"  - Reload Models: {reload_model}")
     logger.config(f"  - Symbol:        {symbol_input}")
     logger.config(f"  - Timeframe:     {timeframe_input}")
     logger.config(f"  - Signal:        {signal_input}")
+    logger.config("="*60)
 
+    analysis_params = {
+        'symbol': symbol_input,
+        'timeframe': timeframe_input,
+        'signal': signal_input
+    }
     result = analyzer.run_analysis(
         reload_model=reload_model,
-        symbol=symbol_input,
-        timeframe=timeframe_input,
-        signal=signal_input
+        analysis_params=analysis_params
     )
 
     print_analysis_result(result)

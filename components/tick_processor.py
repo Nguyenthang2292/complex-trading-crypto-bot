@@ -539,6 +539,14 @@ class TickProcessor:
             self.logger.error(f"Error getting grouped symbols: {e}", exc_info=True)
             return {}
         
+    def get_symbols_list_by_quote_usdt(self) -> List[str]:
+        """Gets a list of all symbols for USDT pairs.
+
+        Returns:
+            A list of trading symbols.
+        """
+        return self.get_symbols_list_by_quote_asset('USDT')
+        
     def get_historic_data_by_symbol(
         self, symbol: str, timeframe: str, num_candles: int = 450
     ) -> Optional[pd.DataFrame]:

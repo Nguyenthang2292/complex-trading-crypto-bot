@@ -52,10 +52,11 @@ except ImportError:
         autocast = None
         GradScaler = None
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add project root to Python path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utilities._logger import setup_logging
-from utilities._gpu_resource_manager import get_gpu_resource_manager, check_gpu_availability
+from utilities._gpu_resource_manager import get_gpu_resource_manager
 logger = setup_logging(module_name="signals_transformer", log_level=logging.DEBUG)
 
 from components._generate_indicator_features import generate_indicator_features
@@ -67,7 +68,7 @@ from components.config import (
 )
 
 # Check GPU availability
-gpu_available: bool = check_gpu_availability()
+gpu_available: bool = get_gpu_resource_manager().is_cuda_available
 
 def setup_safe_globals():
     """Setup safe globals for PyTorch serialization to handle numpy compatibility."""
@@ -243,14 +244,14 @@ class TimeSeriesTransformer(nn.Module):
     
     def __init__(
         self,
-        feature_size: int = GPU_MODEL_CONFIG['feature_size'],
-        num_layers: int = GPU_MODEL_CONFIG['num_layers'],
-        d_model: int = GPU_MODEL_CONFIG['d_model'],
-        nhead: int = GPU_MODEL_CONFIG['nhead'],
-        dim_feedforward: int = GPU_MODEL_CONFIG['dim_feedforward'],
-        dropout: float = GPU_MODEL_CONFIG['dropout'],
-        seq_length: int = GPU_MODEL_CONFIG['seq_length'],
-        prediction_length: int = GPU_MODEL_CONFIG['prediction_length']
+        feature_size: int = GPU_MODEL_CONFIG.feature_size,
+        num_layers: int = GPU_MODEL_CONFIG.num_layers,
+        d_model: int = GPU_MODEL_CONFIG.d_model,
+        nhead: int = GPU_MODEL_CONFIG.nhead,
+        dim_feedforward: int = GPU_MODEL_CONFIG.dim_feedforward,
+        dropout: float = GPU_MODEL_CONFIG.dropout,
+        seq_length: int = GPU_MODEL_CONFIG.seq_length,
+        prediction_length: int = GPU_MODEL_CONFIG.prediction_length
     ) -> None:
         """Initialize transformer model with specified configuration.
 
@@ -299,8 +300,8 @@ class TimeSeriesTransformer(nn.Module):
 # ===================== PREPROCESSING PIPELINE =====================
 def preprocess_transformer_data(
     df_input: pd.DataFrame, 
-    seq_length: int = GPU_MODEL_CONFIG['seq_length'],
-    prediction_length: int = GPU_MODEL_CONFIG['prediction_length'],
+    seq_length: int = GPU_MODEL_CONFIG.seq_length,
+    prediction_length: int = GPU_MODEL_CONFIG.prediction_length,
     feature_cols: Optional[List[str]] = None
 ) -> Tuple[np.ndarray, np.ndarray, MinMaxScaler, List[str]]:
     """Preprocess data for transformer model with sliding window approach.
@@ -734,18 +735,33 @@ def train_and_save_transformer_model(
             logger.error(f"Insufficient data for training: {len(df_input)} < {MIN_DATA_POINTS}")
             return None, ""
         gpu_manager = get_gpu_resource_manager()
-        tensor_info = gpu_manager.get_tensor_core_info() if gpu_available else {'has_tensor_cores': False, 'generation': 'N/A'}
-        has_tensor_cores = tensor_info['has_tensor_cores']
-        if has_tensor_cores:
-            logger.gpu(f"Detected {tensor_info['generation']} Tensor Cores - Optimization enabled")
+        gpu_available = gpu_manager.is_cuda_available
         
-        X, y, scaler, feature_cols = preprocess_transformer_data(df_input)
+        actual_device = get_optimal_device()
+        has_tensor_cores = gpu_manager.get_tensor_core_info()['has_tensor_cores']
+        
+        logger.config("Starting Transformer model training...")
+        logger.config(f"GPU available: {gpu_available}")
+        logger.config(f"Using device: {actual_device}")
+
+        # If using CPU, fall back to CPU-specific model architecture
+        if actual_device.type == 'cpu':
+            logger.warning("Falling back to CPU configuration for Transformer model")
+            model_config = CPU_MODEL_CONFIG
+        else:
+            model_config = GPU_MODEL_CONFIG
+        
+        feature_cols = MODEL_FEATURES + ['ma_20_slope']
+        X, y, scaler, feature_names = preprocess_transformer_data(
+            df_input,
+            seq_length=model_config.seq_length,
+            prediction_length=model_config.prediction_length
+        )
         if len(X) == 0:
             logger.error("Data preprocessing failed - no valid sequences created")
             return None, ""
         
         target_idx = feature_cols.index(COL_CLOSE)
-        seq_len, pred_len = GPU_MODEL_CONFIG['seq_length'], GPU_MODEL_CONFIG['prediction_length']
         dataset = CryptoDataset(X, y)
         
         if len(dataset) < 100:
@@ -759,9 +775,8 @@ def train_and_save_transformer_model(
         
         batch_size = 32
         if gpu_available:
-            gpu_manager = get_gpu_resource_manager()
             memory_info = gpu_manager.get_memory_info()
-            total_memory_gb = float(memory_info['total']) / 1024**3 if isinstance(memory_info['total'], (int, float)) else 0
+            total_memory_gb = safe_memory_division(memory_info['total'], 1024**3)
             if total_memory_gb >= 24:
                 base_batch_size = 128
             elif total_memory_gb >= 16:
@@ -784,8 +799,8 @@ def train_and_save_transformer_model(
         num_workers = 0 if gpu_available else min(4, cpu_count // 2)
         
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, 
-                                 pin_memory=pin_memory, num_workers=num_workers, 
-                                 persistent_workers=True if num_workers > 0 else False)
+                                   pin_memory=pin_memory, num_workers=num_workers, 
+                                   persistent_workers=True if num_workers > 0 else False)
         val_loader = DataLoader(val_ds, batch_size=batch_size * 2, shuffle=False,
                                pin_memory=pin_memory, num_workers=num_workers,
                                persistent_workers=True if num_workers > 0 else False)
@@ -793,116 +808,54 @@ def train_and_save_transformer_model(
         device = 'cuda' if gpu_available else 'cpu'
         logger.config(f"Training on device: {device}")
         
-        model_config = GPU_MODEL_CONFIG.copy() if gpu_available else CPU_MODEL_CONFIG.copy()
-        model_config['feature_size'] = len(feature_cols)
-        
-        if gpu_available and has_tensor_cores:
-            original_d_model = model_config['d_model']
-            original_feedforward = model_config['dim_feedforward']
-            model_config['d_model'] = ((original_d_model + 7) // 8) * 8
-            model_config['dim_feedforward'] = ((original_feedforward + 7) // 8) * 8
-            if model_config['d_model'] != original_d_model or model_config['dim_feedforward'] != original_feedforward:
-                logger.gpu(f"Optimized model dimensions for Tensor Cores: "
-                          f"d_model {original_d_model} -> {model_config['d_model']}, "
-                          f"feedforward {original_feedforward} -> {model_config['dim_feedforward']}")
-        
-        model = TimeSeriesTransformer(**model_config)
-        trained_model, training_history = train_transformer_model(
-            model=model, 
-            train_loader=train_loader, 
-            val_loader=val_loader, 
-            device=device, 
-            epochs=DEFAULT_EPOCHS,
-            use_early_stopping=True,
-            patience=15,
-            use_mixed_precision=gpu_available,
-            gradient_accumulation_steps=2 if gpu_available else 1,
-            lr=3e-4 if gpu_available else 1e-3
+        model = TimeSeriesTransformer(
+            feature_size=len(feature_cols),
+            num_layers=model_config.num_layers,
+            d_model=model_config.d_model,
+            nhead=model_config.nhead,
+            dim_feedforward=model_config.dim_feedforward,
+            dropout=model_config.dropout,
+            seq_length=model_config.seq_length,
+            prediction_length=model_config.prediction_length
         )
         
-        logger.analysis("="*60)
-        logger.analysis("TRAINING DATA ANALYSIS FOR BIAS DETECTION")
-        logger.analysis("="*60)
-        
-        df_with_features = generate_indicator_features(df_input)
-        sample_size = min(1000, len(df_with_features) - FUTURE_RETURN_SHIFT)
-        if sample_size > 0:
-            sample_data = df_with_features.tail(sample_size)
-            future_returns = sample_data[COL_CLOSE].shift(FUTURE_RETURN_SHIFT) / sample_data[COL_CLOSE] - 1
-            future_returns = future_returns.dropna()
-            
-            if len(future_returns) > 0:
-                positive_returns = (future_returns > BUY_THRESHOLD).sum()
-                negative_returns = (future_returns < SELL_THRESHOLD).sum()
-                neutral_returns = len(future_returns) - positive_returns - negative_returns
-                
-                logger.analysis(f"Historical price movement distribution:")
-                logger.analysis(f"  • Positive moves (>{BUY_THRESHOLD:.4f}): {positive_returns} ({positive_returns/len(future_returns):.1%})")
-                logger.analysis(f"  • Negative moves (<{SELL_THRESHOLD:.4f}): {negative_returns} ({negative_returns/len(future_returns):.1%})")
-                logger.analysis(f"  • Neutral moves: {neutral_returns} ({neutral_returns/len(future_returns):.1%})")
-                logger.analysis(f"  • Mean return: {future_returns.mean():.6f}")
-                logger.analysis(f"  • Std return: {future_returns.std():.6f}")
-                
-                if negative_returns / len(future_returns) < 0.2:
-                    logger.warning("⚠️  TRAINING DATA BIAS DETECTED:")
-                    logger.warning("   Historical data shows fewer downward movements")
-                    logger.warning("   This may cause model to be biased toward bullish predictions")
-        
-        suggested_buy_threshold, suggested_sell_threshold = analyze_model_bias_and_adjust_thresholds(
-            df_with_features, trained_model, scaler, feature_cols, target_idx, device
+        model, history = train_transformer_model(
+            model,
+            train_loader,
+            val_loader=val_loader,
+            device=device
         )
         
-        logger.analysis("="*60)
+        if not model_filename:
+            model_filename = "transformer_model_global.pth"
         
-        if model_filename is None:
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            model_filename = f"{TRANSFORMER_MODEL_FILENAME.split('.')[0]}_{timestamp}.pth"
-        
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        model_path = MODELS_DIR / model_filename
+        model_path = str(MODELS_DIR / model_filename)
         
         checkpoint = {
-            'model_state_dict': trained_model.state_dict(),
+            'model_state_dict': model.state_dict(),
+            'scaler': scaler,
+            'feature_cols': feature_cols,
+            'target_col_idx': target_idx,
+            'training_history': history,
             'model_config': {
                 'feature_size': len(feature_cols),
-                'seq_length': model_config['seq_length'],
-                'prediction_length': model_config['prediction_length'],
-                'num_layers': model_config['num_layers'],
-                'd_model': model_config['d_model'],
-                'nhead': model_config['nhead'],
-                'dim_feedforward': model_config['dim_feedforward'],
-                'dropout': model_config['dropout']
-            },
-            'data_info': {
-                'scaler': scaler,
-                'feature_cols': feature_cols,
-                'target_idx': target_idx,
-                'sequence_length': seq_len
-            },
-            'optimization_results': {
-                'suggested_buy_threshold': suggested_buy_threshold,
-                'suggested_sell_threshold': suggested_sell_threshold,
-                'buy_threshold': BUY_THRESHOLD,
-                'sell_threshold': SELL_THRESHOLD
-            },
-            'training_history': training_history,
-            'training_metadata': {
-                'total_samples': len(df_input),
-                'tensor_cores': has_tensor_cores,
-                'tensor_core_generation': tensor_info.get('generation', 'N/A'),
-                'device': device,
-                'mixed_precision': gpu_available
+                'num_layers': model_config.num_layers,
+                'd_model': model_config.d_model,
+                'nhead': model_config.nhead,
+                'dim_feedforward': model_config.dim_feedforward,
+                'dropout': model_config.dropout,
+                'seq_length': model_config.seq_length,
+                'prediction_length': model_config.prediction_length
             }
         }
         
-        success = safe_save_model(checkpoint, str(model_path))
-        if success:
-            logger.success(f"Model saved to {model_path}")
+        if safe_save_model(checkpoint, model_path):
+            logger.success(f"Transformer model saved to {model_path}")
         else:
-            logger.error(f"Failed to save model to {model_path}")
+            logger.error(f"Failed to save Transformer model to {model_path}")
+            return None, ""
         
-        return trained_model, str(model_path)
+        return model, model_path
         
     except Exception as e:
         import traceback

@@ -17,6 +17,7 @@ bổ sung datatype cho input và return đầy đủ theo chuẩn của Goolgle
 sử dụng _gpu_resource_manager.py nếu có thể
 
 - kiểm tra, viết lại và bổ sung unittest cho tôi (cover toàn bộ các testcase), viết thành từng phần để tránh hạn chế token
+- viết cho tôi file trading_signal_analyzer__unittest__.py của @trading_signal_analyzer.py (cover toàn bộ các testcase) - tạo dần từng phần để tránh giới hạn token
 
 - refactor lại file, loại bỏ các comment không cần thiết, thêm comment và docstring cần thiết theo chuẩn Google, sửa từng phần để tránh hạn chế token, sau đó chấm điểm theo Pylint
 
