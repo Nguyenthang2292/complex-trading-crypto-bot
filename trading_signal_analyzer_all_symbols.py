@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from components._load_all_symbols_data import load_all_symbols_data
-from components.tick_processor import tick_processor
+from components.tick_processor import TickProcessor
 from components._combine_all_dataframes import combine_all_dataframes
 from components.config import (
     DEFAULT_TIMEFRAMES, DEFAULT_CRYPTO_SYMBOLS, MODELS_DIR, 
@@ -48,7 +48,7 @@ class TradingSignalAnalyzer:
     def __init__(self) -> None:
         """Initializes the analyzer, fetching the list of valid symbols."""
         self.valid_timeframes: List[str] = DEFAULT_TIMEFRAMES
-        self.processor = tick_processor(trade_open_callback=None, trade_close_callback=None)
+        self.processor = TickProcessor(trade_open_callback=None, trade_close_callback=None)
         
         try:
             self.valid_symbols: List[str] = self.processor.get_symbols_list_by_quote_usdt()
