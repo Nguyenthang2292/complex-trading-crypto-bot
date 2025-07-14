@@ -6,7 +6,7 @@ from typing import Dict, Optional, List, Any, Callable
 import json
 from binance.spot import Spot as Client
 
-from components.config_api import API_KEY, API_SECRET
+from config.config_api import API_KEY, API_SECRET
 
 class TickProcessor:
     """

@@ -29,9 +29,9 @@ from components.config import (
     DEFAULT_TIMEFRAMES, DEFAULT_CRYPTO_SYMBOLS, MODELS_DIR, 
     SIGNAL_LONG, SIGNAL_SHORT, SIGNAL_NEUTRAL
 )
-from signals.signals_best_performance_symbols import signal_best_performance_symbols, get_short_signal_candidates
-from signals.signals_random_forest import get_latest_random_forest_signal, load_random_forest_model, train_and_save_global_rf_model
-from signals.signals_hmm import hmm_signals
+from signals.best_performance_pairs.signals_best_performance_symbols import signal_best_performance_symbols, get_short_signal_candidates
+from signals.quant_models.random_forest.signals_random_forest import get_latest_random_forest_signal, load_random_forest_model, train_and_save_global_rf_model
+from hmm.signals_hmm import hmm_signals
 from signals.signals_transformer import get_latest_transformer_signal, load_transformer_model, train_and_save_transformer_model
 from signals.signals_cnn_lstm_attention import (
     train_cnn_lstm_attention_model, 
