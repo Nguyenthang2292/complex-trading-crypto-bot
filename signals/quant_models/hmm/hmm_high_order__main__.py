@@ -11,7 +11,7 @@ current_dir = Path(__file__).parent
 project_root = current_dir.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from signals.quant_models.hmm.HMM__class__OptimizingParameters import OptimizingParameters
+from signals.quant_models.hmm.__class__OptimizingParameters import OptimizingParameters
 from signals.quant_models.hmm.hmm_high_order import hmm_high_order
 from utilities._logger import setup_logging
 logger = setup_logging('hmm_high_order__main__', log_level=logging.DEBUG)

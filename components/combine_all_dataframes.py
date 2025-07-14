@@ -1,10 +1,10 @@
 import logging
 from typing import Dict, List, Tuple, Optional
 import pandas as pd
-from utilities._logger import setup_logging
+from utilities.logger import setup_logging
 
 # Initialize logger
-logger = setup_logging(module_name="_combine_all_dataframes", log_level=logging.DEBUG)
+logger = setup_logging(module_name="combine_all_dataframes", log_level=logging.DEBUG)
 
 def _process_single_dataframe(
     symbol_key: str, tf_key: str, df_original: pd.DataFrame

@@ -74,7 +74,7 @@ MACD_SIGNAL_PERIOD = 9  # MACD signal line period
 DEFAULT_WINDOW_SIZE = 20  # Default window size for calculations
 
 # Market Data & Testing Configuration
-DEFAULT_TIMEFRAMES: List[str] = ['1h', '4h', '1d']
+DEFAULT_TIMEFRAMES: List[str] = ['15m','30m', '1h', '4h', '1d']
 DEFAULT_CRYPTO_SYMBOLS: List[str] = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", 
     "XRPUSDT", "SOLUSDT", "DOGEUSDT", "DOTUSDT"

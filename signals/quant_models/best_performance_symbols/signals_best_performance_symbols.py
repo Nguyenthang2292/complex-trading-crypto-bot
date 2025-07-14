@@ -32,15 +32,15 @@ import sys
 import pandas as pd
 from datetime import datetime, timezone
 from tqdm import tqdm
-from typing import Any, List, Dict, Optional, Tuple, Union
+from typing import Any, List, Dict, Optional, Tuple
 
 # Add the parent directory to sys.path to allow importing modules from sibling directories
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from components.tick_processor import TickProcessor
-from config.config import (DEFAULT_TIMEFRAMES, DEFAULT_TOP_SYMBOLS, MIN_DATA_POINTS)
+from config.config import (DEFAULT_TIMEFRAMES, MIN_DATA_POINTS)
 from signals.quant_models.best_performance_symbols.__class__PerformanceAnalyzer import PerformanceAnalyzer
-from utilities._logger import setup_logging
+from utilities.logger import setup_logging
 
 # Setup logging with new format
 logger = setup_logging(module_name="signals_best_performance_symbols", log_level=logging.DEBUG)

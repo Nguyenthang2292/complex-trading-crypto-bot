@@ -8,9 +8,9 @@ from typing import List, Optional, Tuple, Union, cast, Callable, Any
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from utilities._logger import setup_logging
+from utilities.logger import setup_logging
 
-logger = setup_logging(module_name="_generate_indicator_features", log_level=logging.DEBUG)
+logger = setup_logging(module_name="generate_indicator_features", log_level=logging.DEBUG)
 
 from config.config import (
     BB_STD_MULTIPLIER, 

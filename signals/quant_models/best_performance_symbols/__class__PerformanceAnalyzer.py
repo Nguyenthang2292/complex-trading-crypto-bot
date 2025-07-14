@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 from config.config import DEFAULT_WINDOW_SIZE, RSI_PERIOD
-from utilities._logger import setup_logging
+from utilities.logger import setup_logging
 
 
 # Setup logging with new format
@@ -181,6 +181,7 @@ class PerformanceAnalyzer:
                 'composite_score': long_score,
                 'short_composite_score': short_score,
                 'total_return': basic_metrics['total_return'],
+                'return_over_period': basic_metrics['total_return'],
                 'volatility': basic_metrics['volatility'],
                 'sharpe_ratio': basic_metrics['sharpe_ratio'],
                 'max_drawdown': basic_metrics['max_drawdown'],

@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Union, Any, cast
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     
-from utilities._logger import setup_logging
+from utilities.logger import setup_logging
 from config.config import (DEFAULT_TIMEFRAMES,
                                MAX_CPU_MEMORY_FRACTION,
                                DATA_PROCESSING_WAIT_TIME_IN_SECONDS,
@@ -38,7 +38,7 @@ TQDM_COLORS = {
     'memory': '#DDA0DD'
 }
 
-logger = setup_logging(module_name="_load_all_symbols_data", log_level=logging.DEBUG)
+logger = setup_logging(module_name="load_all_symbols_data", log_level=logging.DEBUG)
 _CACHE_LOCK = threading.Lock()
 
 def _create_progress_bar(total: int, desc: str, color: str, unit: str = 'it', leave: bool = True) -> tqdm:

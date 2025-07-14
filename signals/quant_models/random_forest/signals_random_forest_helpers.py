@@ -31,7 +31,7 @@ from config.config import (
     SELL_THRESHOLD,
 )
 from components.generate_indicator_features import generate_indicator_features
-from utilities._logger import setup_logging
+from utilities.logger import setup_logging
 
 logger = setup_logging(module_name="signals_random_forest_helpers", log_level=logging.INFO)
 

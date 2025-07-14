@@ -39,7 +39,7 @@ from signals.quant_models.random_forest.signals_random_forest_helpers import (
     _create_model_and_weights,
     _prepare_training_data
 )
-from utilities._logger import setup_logging
+from utilities.logger import setup_logging
 
 logger = setup_logging(module_name="signals_random_forest", log_level=logging.INFO)
 
