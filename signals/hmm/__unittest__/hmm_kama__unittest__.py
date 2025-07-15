@@ -14,13 +14,15 @@ import warnings
 from dataclasses import dataclass
 
 # Import the functions to test
-from signals.quant_models.hmm.hmm_kama import (
+from signals.hmm.__quant_models__.hmm_kama import (
     hmm_kama, calculate_kama, prepare_observations, train_hmm, 
     apply_hmm_model, compute_state_using_standard_deviation,
     compute_state_using_hmm, compute_state_using_association_rule_mining,
     compute_state_using_k_means, calculate_all_state_durations,
     HMM_KAMA, calculate_composite_scores_association_rule_mining,
+    timeout_context, STATE_MAPPING
 )
+from signals.hmm.__components__.__class__OptimizingParameters import OptimizingParameters
 
 # Mock OptimizingParameters class for testing
 @dataclass
@@ -674,7 +676,7 @@ class TestHMMKama(unittest.TestCase):
 
     def test_timeout_context_manager(self):
         """Test timeout context manager with quick operation"""
-        from signals.quant_models.hmm.hmm_kama import timeout_context
+        from signals.hmm.__quant_models__.hmm_kama import timeout_context
         
         # Test successful operation within timeout
         with timeout_context(5):
@@ -701,7 +703,7 @@ class TestHMMKama(unittest.TestCase):
 
     def test_state_mapping_coverage(self):
         """Test that all state mappings are properly handled"""
-        from signals.quant_models.hmm.hmm_kama import STATE_MAPPING
+        from signals.hmm.__quant_models__.hmm_kama import STATE_MAPPING
         
         # Ensure all expected states are in mapping
         expected_states = ["bearish weak", "bullish weak", "bearish strong", "bullish strong"]
@@ -807,7 +809,7 @@ class TestHMMKama(unittest.TestCase):
 
     def test_timeout_context_manager_success(self):
         """Test timeout context manager with successful operation"""
-        from signals.quant_models.hmm.hmm_kama import timeout_context
+        from signals.hmm.__quant_models__.hmm_kama import timeout_context
         
         with timeout_context(5):
             result = 1 + 1
@@ -815,7 +817,7 @@ class TestHMMKama(unittest.TestCase):
 
     def test_timeout_context_manager_timeout(self):
         """Test timeout context manager with timeout"""
-        from signals.quant_models.hmm.hmm_kama import timeout_context
+        from signals.hmm.__quant_models__.hmm_kama import timeout_context
         import time
         
         with self.assertRaises(TimeoutError):

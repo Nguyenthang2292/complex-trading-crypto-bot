@@ -34,7 +34,7 @@ from config.config import (
     SIGNAL_NEUTRAL,
     SIGNAL_SHORT
 )
-from signals.quant_models.random_forest.signals_random_forest_helpers import (
+from signals.random_forest.signals_random_forest_helpers import (
     _apply_smote,
     _create_model_and_weights,
     _prepare_training_data

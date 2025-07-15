@@ -12,8 +12,8 @@ current_dir = Path(__file__).parent
 project_root = current_dir.parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from signals.quant_models.hmm.__class__OptimizingParameters import OptimizingParameters
-from signals.quant_models.hmm.hmm_high_order import (
+from signals.hmm.__components__.__class__OptimizingParameters import OptimizingParameters
+from signals.hmm.__quant_models__.hmm_high_order import (
     hmm_high_order,
     convert_swing_to_state,
     create_hmm_model,
@@ -249,7 +249,7 @@ class TestHMMHighOrder(unittest.TestCase):
         self.assertEqual(NEUTRAL, 0)
         self.assertEqual(BEARISH, -1)
 
-    @patch('signals.quant_models.hmm.hmm_high_order.optimize_n_states')
+    @patch('signals.hmm.__quant_models__.hmm_high_order.optimize_n_states')
     def test_hmm_high_order_optimize_exception(self, mock_optimize):
         """Test hmm_high_order when optimize_n_states raises exception"""
         mock_optimize.side_effect = Exception("Test exception")
@@ -273,7 +273,7 @@ class TestHMMHighOrder(unittest.TestCase):
             'close': prices
         }, index=dates)
         
-        with patch('signals.quant_models.hmm.hmm_high_order.evaluate_model_accuracy', return_value=0.2):
+        with patch('signals.hmm.__quant_models__.hmm_high_order.evaluate_model_accuracy', return_value=0.2):
             result = hmm_high_order(df_noisy)
             
             self.assertEqual(result.next_state_with_high_order_hmm, NEUTRAL)
@@ -352,8 +352,8 @@ class TestHMMHighOrder(unittest.TestCase):
         self.assertIn(result.next_state_with_high_order_hmm, [BULLISH, NEUTRAL, BEARISH])
         self.assertGreater(result.next_state_probability, 0.0)
 
-    @patch('signals.quant_models.hmm.hmm_high_order.create_hmm_model')
-    @patch('signals.quant_models.hmm.hmm_high_order.optimize_n_states')
+    @patch('signals.hmm.__quant_models__.hmm_high_order.create_hmm_model')
+    @patch('signals.hmm.__quant_models__.hmm_high_order.optimize_n_states')
     def test_hmm_integration_flow(self, mock_optimize, mock_create):
         """Test the complete integration flow with mocked dependencies"""
         mock_optimize.return_value = 2  # Use 2 states for simpler mocking
@@ -486,7 +486,7 @@ class TestHMMHighOrder(unittest.TestCase):
         mock_model = MagicMock()
         
         # Mock forward_backward to return expected 5-tuple
-        with patch('signals.quant_models.hmm.hmm_high_order.safe_forward_backward') as mock_fb:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.safe_forward_backward') as mock_fb:
             mock_fb.return_value = (
                 np.array([0.1, 0.2]),
                 np.array([[0.3, 0.4, 0.3], [0.5, 0.6, 0.1], [0.2, 0.7, 0.1]]),  # 3 time steps
@@ -506,7 +506,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_predict_next_observation_detailed(self):
         """Test predict_next_observation with detailed mocking"""
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
             mock_predict.return_value = [0.6, 0.4]  # 2 hidden states
             
             mock_model = MagicMock()
@@ -539,7 +539,7 @@ class TestHMMHighOrder(unittest.TestCase):
         """Test evaluate_model_accuracy with perfect predictions"""
         mock_model = MagicMock()
         
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             # Mock perfect predictions
             mock_predict.side_effect = [
                 np.array([0.9, 0.05, 0.05]),  # Predicts state 0
@@ -637,7 +637,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_hmm_high_order_nan_probability_handling(self):
         """Test hmm_high_order handles NaN probabilities correctly"""
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             # Mock function to return NaN probabilities
             mock_predict.return_value = np.array([np.nan, np.nan, np.nan])
             
@@ -650,7 +650,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_hmm_high_order_infinite_probability_handling(self):
         """Test hmm_high_order handles infinite probabilities correctly"""
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             # Mock function to return infinite probabilities - first element is inf
             mock_predict.return_value = np.array([np.inf, 0.5, 0.3])
             
@@ -663,7 +663,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_hmm_high_order_all_infinite_probability_handling(self):
         """Test hmm_high_order handles all infinite probabilities correctly"""
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             # Mock function to return all infinite probabilities
             mock_predict.return_value = np.array([np.inf, np.inf, np.inf])
             
@@ -676,7 +676,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_hmm_high_order_mixed_nan_inf_probability_handling(self):
         """Test hmm_high_order handles mixed NaN and infinite probabilities correctly"""
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             # Mock function to return mixed NaN/inf probabilities
             mock_predict.return_value = np.array([np.nan, np.inf, 0.7])
             
@@ -741,7 +741,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_hmm_high_order_model_creation_error(self):
         """Test hmm_high_order handles model creation/training errors"""
-        with patch('signals.quant_models.hmm.hmm_high_order.create_hmm_model') as mock_create:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.create_hmm_model') as mock_create:
             mock_create.side_effect = Exception("Model creation failed")
             
             result = hmm_high_order(self.df_valid)
@@ -752,7 +752,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_hmm_high_order_invalid_converted_distance(self):
         """Test hmm_high_order handles invalid converted_distance values"""
-        with patch('signals.quant_models.hmm.hmm_high_order.average_swing_distance') as mock_distance:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.average_swing_distance') as mock_distance:
             # Mock to return invalid values
             mock_distance.return_value = -1  # Negative distance
             
@@ -763,7 +763,7 @@ class TestHMMHighOrder(unittest.TestCase):
 
     def test_hmm_high_order_invalid_max_value(self):
         """Test hmm_high_order handles invalid max_value from prediction"""
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             # Mock to return probabilities that result in invalid max_value
             mock_predict.return_value = np.array([np.nan, np.nan, np.nan])
             
@@ -881,7 +881,7 @@ class TestHMMHighOrder(unittest.TestCase):
         """Test optimize_n_states handles training exceptions gracefully"""
         observations = [np.array([0, 1, 2, 1, 0, 2, 1]).reshape(-1, 1)]
         
-        with patch('signals.quant_models.hmm.hmm_high_order.create_hmm_model') as mock_create:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.create_hmm_model') as mock_create:
             mock_create.side_effect = Exception("Training failed")
             
             # Should continue with other n_states values
@@ -892,7 +892,7 @@ class TestHMMHighOrder(unittest.TestCase):
         """Test optimize_n_states handles log_probability exceptions"""
         observations = [np.array([0, 1, 2, 1, 0, 2, 1]).reshape(-1, 1)]
         
-        with patch('signals.quant_models.hmm.hmm_high_order.create_hmm_model') as mock_create:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.create_hmm_model') as mock_create:
             mock_model = MagicMock()
             mock_model.fit.return_value = None
             mock_model.log_probability.side_effect = Exception("Log probability failed")
@@ -915,7 +915,7 @@ class TestHMMHighOrder(unittest.TestCase):
         mock_model = MagicMock()
         
         # Mock forward_backward to return problematic values
-        with patch('signals.quant_models.hmm.hmm_high_order.safe_forward_backward') as mock_fb:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.safe_forward_backward') as mock_fb:
             mock_fb.return_value = (
                 np.array([0.1, 0.2]),
                 np.array([np.inf, np.nan]),  # Problematic log_alpha
@@ -938,7 +938,7 @@ class TestHMMHighOrder(unittest.TestCase):
         mock_model = MagicMock()
         mock_model.distributions = [MagicMock(), MagicMock()]  # 2 states
         
-        with patch('signals.quant_models.hmm.hmm_high_order.safe_forward_backward') as mock_fb:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.safe_forward_backward') as mock_fb:
             mock_fb.side_effect = Exception("Forward-backward failed")
             
             observations = [np.array([0, 1, 2]).reshape(-1, 1)]
@@ -957,7 +957,7 @@ class TestHMMHighOrder(unittest.TestCase):
         mock_dist.parameters.return_value = [None]  # Only one parameter
         mock_model.distributions = [mock_dist]
         
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
             mock_predict.return_value = [0.6, 0.4]
             
             observations = [np.array([0, 1, 2]).reshape(-1, 1)]
@@ -977,7 +977,7 @@ class TestHMMHighOrder(unittest.TestCase):
         mock_dist.parameters.side_effect = Exception("Parameter extraction failed")
         mock_model.distributions = [mock_dist]
         
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
             mock_predict.return_value = [0.6, 0.4]
             
             observations = [np.array([0, 1, 2]).reshape(-1, 1)]
@@ -993,7 +993,7 @@ class TestHMMHighOrder(unittest.TestCase):
         mock_model = MagicMock()
         mock_model.distributions = []  # Empty distributions
         
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
             mock_predict.return_value = [0.6, 0.4]
             
             observations = [np.array([0, 1, 2]).reshape(-1, 1)]
@@ -1015,7 +1015,7 @@ class TestHMMHighOrder(unittest.TestCase):
         mock_dist2.parameters.return_value = [None, np.array([[0.0, 0.0, 0.0]])]
         mock_model.distributions = [mock_dist1, mock_dist2]
         
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
             mock_predict.return_value = [0.0, 0.0]  # Zero hidden state probabilities
             
             observations = [np.array([0, 1, 2]).reshape(-1, 1)]
@@ -1030,7 +1030,7 @@ class TestHMMHighOrder(unittest.TestCase):
         """Test predict_next_observation handles general exceptions"""
         mock_model = MagicMock()
         
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_hidden_state_forward_backward') as mock_predict:
             mock_predict.side_effect = Exception("Prediction failed")
             
             observations = [np.array([0, 1, 2]).reshape(-1, 1)]
@@ -1114,7 +1114,7 @@ class TestHMMHighOrder(unittest.TestCase):
         train_states = [0, 1, 2]
         test_states = [0, 1, 2]
         
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             mock_predict.side_effect = Exception("Prediction failed")
             
             accuracy = evaluate_model_accuracy(mock_model, train_states, test_states) # type: ignore
@@ -1127,7 +1127,7 @@ class TestHMMHighOrder(unittest.TestCase):
         train_states = [0, 1, 2]
         test_states = [0, 1, 2]
         
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             # Mock to return probabilities that result in invalid accuracy
             mock_predict.return_value = np.array([np.nan, np.nan, np.nan])
             
@@ -1141,7 +1141,7 @@ class TestHMMHighOrder(unittest.TestCase):
         test_states = [0, 1, 2]
         
         # Mock to raise exception during evaluation
-        with patch('signals.quant_models.hmm.hmm_high_order.predict_next_observation') as mock_predict:
+        with patch('signals.hmm.__quant_models__.hmm_high_order.predict_next_observation') as mock_predict:
             mock_predict.side_effect = Exception("Evaluation failed")
             
             accuracy = evaluate_model_accuracy(mock_model, train_states, test_states) # type: ignore

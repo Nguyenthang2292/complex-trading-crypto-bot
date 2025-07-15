@@ -8,7 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from signals.quant_models.hmm.__class__OptimizingParameters import OptimizingParameters
+from signals.hmm.__components__.__class__OptimizingParameters import OptimizingParameters
 from components.tick_processor import TickProcessor 
 from config.config import (
     SIGNAL_LONG_HMM as LONG,
@@ -17,7 +17,7 @@ from config.config import (
     DATA_PROCESSING_WAIT_TIME_IN_SECONDS
 )
 from hmm.signals_hmm import hmm_signals
-from utilities._logger import setup_logging
+from utilities.logger import setup_logging
 
 logger = setup_logging(module_name="signals_hmm__main__", log_level=logging.INFO)
 Signal = Literal[-1, 0, 1]

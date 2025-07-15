@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 from components.tick_processor import TickProcessor
 from components.load_all_symbols_data import load_symbol_data
 from config.config import DEFAULT_TIMEFRAMES
-from signals.quant_models.best_performance_symbols.signals_best_performance_symbols import (signal_best_performance_symbols, logging_performance_summary)
+from signals.best_performance_symbols.signals_best_performance_symbols import (signal_best_performance_symbols, logging_performance_summary)
 from utilities._logger import setup_logging
 
 logger = setup_logging('signals_best_performance_symbols__main__', log_level=logging.DEBUG)

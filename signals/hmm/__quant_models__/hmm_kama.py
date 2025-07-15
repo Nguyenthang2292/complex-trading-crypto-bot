@@ -23,7 +23,7 @@ warnings.filterwarnings('ignore', message='KMeans is known to have a memory leak
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
 
-from signals.quant_models.hmm.__class__OptimizingParameters import OptimizingParameters
+from signals.hmm.__components__.__class__OptimizingParameters import OptimizingParameters
 from utilities.logger import setup_logging
 logger = setup_logging('hmm_kama', log_level=logging.DEBUG)
     
@@ -91,7 +91,7 @@ def prepare_observations(data: pd.DataFrame, optimizing_params: OptimizingParame
         raise ValueError(f"Invalid data: empty={data.empty}, has close={'close' in data.columns}, len={len(data)}")
     
     close_prices = data["close"].replace([np.inf, -np.inf], np.nan).ffill().bfill()
-    if close_prices.isna().any():
+    if close_prices.isna().any(): # type: ignore    
         close_prices = close_prices.fillna(close_prices.median())
 
     price_range = close_prices.max() - close_prices.min()
@@ -331,7 +331,7 @@ def calculate_composite_scores_association_rule_mining(rules: pd.DataFrame) -> p
     for col in numeric_cols:
         if col in rules.columns:
             rules[col] = rules[col].replace([np.inf, -np.inf], np.nan)
-            fill_value = rules[col].median() if rules[col].notna().any() else 0.0
+            fill_value = rules[col].median() if rules[col].notna().any() else 0.0 # type: ignore
             rules[col] = rules[col].fillna(fill_value)
     
     metrics = [m for m in ['antecedent support', 'consequent support', 'support', 'confidence',
@@ -407,7 +407,7 @@ def compute_state_using_association_rule_mining(durations: pd.DataFrame) -> Tupl
     rules_fpgrowth = pd.DataFrame()
     if not frequent_itemsets_fpgrowth.empty:
         try:
-            rules_fpgrowth = association_rules(frequent_itemsets_fpgrowth, metric="confidence", min_threshold=0.6)
+            rules_fpgrowth = association_rules(frequent_itemsets_fpgrowth, metric="confidence", min_threshold=0.6) # type: ignore
         except Exception as e:
             logger.warning(f"Error generating association rules for FP-Growth: {e}")
             
@@ -448,7 +448,7 @@ def calculate_all_state_durations(data: pd.DataFrame) -> pd.DataFrame:
     df = data.copy()
     df['group'] = (df['state'] != df['state'].shift()).cumsum()
     
-    return df.groupby('group').agg(
+    return df.groupby('group').agg(     # type: ignore
         state=('state', 'first'),
         start_time=('state', lambda s: s.index[0]),
         duration=('state', 'size')

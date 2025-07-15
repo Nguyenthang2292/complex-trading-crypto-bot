@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from components.tick_processor import TickProcessor
 from config.config import (DEFAULT_TIMEFRAMES, MIN_DATA_POINTS)
-from signals.quant_models.best_performance_symbols.__class__PerformanceAnalyzer import PerformanceAnalyzer
+from signals.best_performance_symbols.__components__.__class__PerformanceAnalyzer import PerformanceAnalyzer
 from utilities.logger import setup_logging
 
 # Setup logging with new format

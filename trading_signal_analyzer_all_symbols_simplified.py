@@ -11,11 +11,11 @@ from components.load_all_symbols_data import load_all_symbols_data
 from components.tick_processor import TickProcessor
 from components.combine_all_dataframes import combine_all_dataframes
 from config.config import DEFAULT_TIMEFRAMES, SIGNAL_LONG, SIGNAL_SHORT
-from signals.quant_models.random_forest.signals_random_forest import (
+from signals.random_forest.signals_random_forest import (
     get_latest_random_forest_signal, train_and_save_global_rf_model, load_random_forest_model
 )
-from signals.quant_models.best_performance_symbols.signals_best_performance_symbols import signal_best_performance_symbols
-from signals.quant_models.hmm.signals_hmm import hmm_signals
+from signals.best_performance_symbols.signals_best_performance_symbols import signal_best_performance_symbols
+from signals.hmm.signals_hmm import hmm_signals
 from utilities.logger import setup_logging
 
 
@@ -145,8 +145,6 @@ def main():
     else:
         logger.error("Không thể load mô hình Random Forest. Bỏ qua bước sinh tín hiệu RF.")
 
-    logger.info(f"rf_signals_long: {rf_signals_long}")
-    logger.info(f"rf_signals_short: {rf_signals_short}")
     logger.info(f"Số cặp LONG qua RF: {len(rf_signals_long)}")
     logger.info(f"Số cặp SHORT qua RF: {len(rf_signals_short)}")
 
@@ -168,8 +166,6 @@ def main():
         if hmm_result[0] == -1 or hmm_result[1] == -1:  # strict hoặc non-strict SHORT
             hmm_signals_short.append(entry)
 
-    logger.info(f"hmm_signals_long: {hmm_signals_long}")
-    logger.info(f"hmm_signals_short: {hmm_signals_short}")
     logger.info(f"Số cặp LONG đồng thuận RF+HMM: {len(hmm_signals_long)}")
     logger.info(f"Số cặp SHORT đồng thuận RF+HMM: {len(hmm_signals_short)}")
 

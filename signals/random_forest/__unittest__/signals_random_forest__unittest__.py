@@ -11,7 +11,7 @@ import shutil
 # Add the parent directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from signals.quant_models.random_forest.signals_random_forest import (
+from signals.random_forest.signals_random_forest import (
     _calculate_features,
     train_random_forest_model,
     get_latest_random_forest_signal,

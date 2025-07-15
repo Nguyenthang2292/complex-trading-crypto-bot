@@ -11,9 +11,9 @@ warnings.filterwarnings('ignore', message='KMeans is known to have a memory leak
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
 
-from signals.quant_models.hmm.__class__OptimizingParameters import OptimizingParameters
-from hmm.hmm_kama import hmm_kama
-from utilities._logger import setup_logging
+from signals.hmm.__components__.__class__OptimizingParameters import OptimizingParameters
+from signals.hmm.__quant_models__.hmm_kama import hmm_kama
+from utilities.logger import setup_logging
 logger = setup_logging('hmm_kama__main__', log_level=logging.DEBUG)
 
 if __name__ == "__main__":

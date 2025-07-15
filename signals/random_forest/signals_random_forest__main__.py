@@ -19,7 +19,7 @@ from components.config import (
     DEFAULT_TOP_SYMBOLS,
     MODEL_FEATURES,
 )
-from signals.quant_models.random_forest.signals_random_forest import (
+from signals.random_forest.signals_random_forest import (
     get_latest_random_forest_signal,
     train_and_save_global_rf_model,
 )

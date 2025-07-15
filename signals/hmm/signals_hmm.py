@@ -9,7 +9,7 @@ main_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 python_path = [main_dir]
 runtime_env = {"env_vars": {"PYTHONPATH": os.pathsep.join(python_path)}}
 
-from signals.quant_models.hmm.__class__OptimizingParameters import OptimizingParameters
+from signals.hmm.__components__.__class__OptimizingParameters import OptimizingParameters
 from config.config import (
     SIGNAL_LONG_HMM as LONG,
     SIGNAL_HOLD_HMM as HOLD,
@@ -17,8 +17,8 @@ from config.config import (
     HMM_PROBABILITY_THRESHOLD,
     MAX_CPU_MEMORY_FRACTION
 )
-from signals.quant_models.hmm.hmm_kama import hmm_kama
-from signals.quant_models.hmm.hmm_high_order import hmm_high_order
+from signals.hmm.__quant_models__.hmm_kama import hmm_kama
+from signals.hmm.__quant_models__.hmm_high_order import hmm_high_order
 from utilities.logger import setup_logging
 logger = setup_logging(module_name="signals_hmm", log_level=logging.DEBUG)
 

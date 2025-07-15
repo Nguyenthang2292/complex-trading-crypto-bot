@@ -17,7 +17,7 @@ from components.config import (
     DEFAULT_TEST_TIMEFRAME,
     DEFAULT_TIMEFRAMES,
 )
-from signals.quant_models.arimax_garch.signals_arimax_garch import (
+from signals.arimax_garch.signals_arimax_garch import (
     get_latest_arimax_garch_signal,
     train_and_save_arimax_garch_model,
     load_arimax_garch_model,

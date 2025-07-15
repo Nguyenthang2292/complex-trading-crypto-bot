@@ -31,12 +31,12 @@ from signals.best_performance_pairs.signals_best_performance_symbols import (
     signal_best_performance_symbols, 
     get_short_signal_candidates
 )
-from signals.quant_models.random_forest.signals_random_forest import (
+from signals.random_forest.signals_random_forest import (
     get_latest_random_forest_signal, 
     load_random_forest_model,
     train_and_save_global_rf_model
 )
-from signals.quant_models.hmm.signals_hmm import hmm_signals
+from signals.hmm.signals_hmm import hmm_signals
 from signals.signals_transformer import (
     get_latest_transformer_signal, 
     load_transformer_model,

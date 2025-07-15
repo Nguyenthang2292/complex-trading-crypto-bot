@@ -18,7 +18,7 @@ init(autoreset=True)
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir.parent.parent)) if str(current_dir.parent.parent) not in sys.path else None
 
-from signals.quant_models.hmm.__class__OptimizingParameters import OptimizingParameters
+from signals.hmm.__components__.__class__OptimizingParameters import OptimizingParameters
 from utilities.logger import setup_logging
 
 logger = setup_logging('hmm_high_order', log_level=logging.DEBUG)

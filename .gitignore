@@ -28,3 +28,7 @@ __pycache__/
 environment.yml
 /environment.yml
 **/environment.yml
+
+# MCP configuration files
+mcp/mcp.json
+**/mcp.json

@@ -41,7 +41,7 @@ LSTM_MODEL_FILENAME = "LSTM_model.pth"
 MAX_TRAINING_ROWS = 1000000  # Maximum rows for training data
 LARGE_DATASET_THRESHOLD_FOR_SMOTE = 50000  # Threshold for SMOTE sampling
 MIN_MEMORY_GB = 1.0  # Minimum required memory in GB
-MAX_CPU_MEMORY_FRACTION = 0.5  # Use 50% of available CPU memory
+MAX_CPU_MEMORY_FRACTION = 0.8  # Use 50% of available CPU memory
 DATA_PROCESSING_WAIT_TIME_IN_SECONDS = 2  # Wait time between data processing
 
 # GPU configuration
